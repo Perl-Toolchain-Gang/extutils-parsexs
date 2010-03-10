@@ -34,6 +34,7 @@ Plugin
 ^inc
 ^kwiki
 ^patch
+^private
 ^t/Sample/(save_out|SIGNATURE|Build)$
 ^t/Sample/_build
 ^t/_
@@ -44,3 +45,4 @@ doc_check.pl$
 save_err$
 ~$
 ^MYMETA.yml$
+MM_Unix.pm$
