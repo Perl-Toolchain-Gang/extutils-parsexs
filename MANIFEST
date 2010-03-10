@@ -6,15 +6,15 @@ Makefile.PL
 MANIFEST
 META.yml			Module meta-data (added by MakeMaker)
 README
-t/basic.t
+t/001-basic.t
+t/002-more.t
+t/003-usage.t
 t/bugs/RT48104.xs
 t/bugs/typemap
 t/include/nscore.h
 t/include/nsUniversalDetector.h
 t/lib/IncludeTester.pm
-t/more.t
 t/typemap
-t/usage.t
 t/XSInclude.xsh
 t/XSMore.xs
 t/XSTest.pm
