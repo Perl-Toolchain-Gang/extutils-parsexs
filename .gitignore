@@ -10,6 +10,7 @@
 /blib
 /cover_db
 /pm_to_blib
+/private
 /PM_to_blib
 /MYMETA.yml
 /ExtUtils-ParseXS*
