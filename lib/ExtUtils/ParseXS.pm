@@ -1,4 +1,6 @@
 package ExtUtils::ParseXS;
+use strict 'subs';
+use strict 'refs';
 
 use 5.006;  # We use /??{}/ in regexes
 use Cwd;
@@ -7,6 +9,7 @@ use Exporter;
 use File::Basename;
 use File::Spec;
 use Symbol;
+use lib qw( lib );
 use ExtUtils::ParseXS::Utilities qw(
   standard_typemap_locations
   trim_whitespace
@@ -460,7 +463,9 @@ EOF
 
     $_ = shift(@line);
     while (my $kwd = check_keyword("REQUIRE|PROTOTYPES|FALLBACK|VERSIONCHECK|INCLUDE(?:_COMMAND)?|SCOPE")) {
+      no strict 'refs';
       &{"${kwd}_handler"}();
+      use strict 'refs';
       next PARAGRAPH unless @line;
       $_ = shift(@line);
     }
@@ -971,8 +976,7 @@ EOF
     }
   }
 
-  if ($Overload) # make it findable with fetchmethod
-  {
+  if ($Overload) { # make it findable with fetchmethod
     print Q(<<"EOF");
 #XS(XS_${Packid}_nil); /* prototype to pass -Wmissing-prototypes */
 #XS(XS_${Packid}_nil)
@@ -1132,8 +1136,10 @@ sub process_keyword($) {
   my($pattern) = @_;
   my $kwd;
 
+  no strict 'refs';
   &{"${kwd}_handler"}()
     while $kwd = check_keyword($pattern);
+  use strict 'refs';
 }
 
 sub CASE_handler {
