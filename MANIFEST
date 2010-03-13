@@ -11,6 +11,7 @@ README
 t/001-basic.t
 t/002-more.t
 t/003-usage.t
+t/101-standard_typemap_locations.t
 t/bugs/RT48104.xs
 t/bugs/typemap
 t/include/nscore.h
