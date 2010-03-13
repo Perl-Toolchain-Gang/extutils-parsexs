@@ -19,7 +19,7 @@ our (@ISA, @EXPORT_OK, $VERSION);
 $VERSION = '3';
 $VERSION = eval $VERSION if $VERSION =~ /_/;
 
-# use strict;  # One of these days...
+# use strict;  # One of these days ...
 
 my(@XSStack);    # Stack of conditionals and INCLUDEs
 my($XSS_work_idx, $cpp_next_tmp);
