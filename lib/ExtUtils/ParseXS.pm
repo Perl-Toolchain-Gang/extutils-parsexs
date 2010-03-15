@@ -44,7 +44,7 @@ our (
   $thisdone, $retvaldone, $deferred, $gotRETVAL, $condnum, $cond,
   $RETVAL_code, $name_printed, $func_args, @XSStack, $ALIAS, 
 );
-#our $DoSetMagic;
+our ($DoSetMagic, $newXS, $proto, $Module_cname, $XsubAliases, $Interfaces, );
 
 sub process_file {
 
@@ -517,8 +517,8 @@ EOF
       unshift(@args, $arg0);
     }
     my $extra_args = 0;
-    @args_num = ();
-    $num_args = 0;
+    my @args_num = ();
+    my $num_args = 0;
     my $report_args = '';
     foreach my $i (0 .. $#args) {
       if ($args[$i] =~ s/\.\.\.//) {
@@ -544,7 +544,7 @@ EOF
       }
       $proto_arg[$i+1] = '$';
     }
-    $min_args = $num_args - $extra_args;
+    my $min_args = $num_args - $extra_args;
     $report_args =~ s/"/\\"/g;
     $report_args =~ s/^,\s+//;
     my @func_args = @args;
@@ -857,8 +857,8 @@ EOF
 #
 EOF
 
-    our $newXS = "newXS";
-    our $proto = "";
+    $newXS = "newXS";
+    $proto = "";
 
     # Build the prototype string for the xsub
     if ($ProtoThisXSUB) {
