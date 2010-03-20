@@ -19,6 +19,7 @@ use ExtUtils::ParseXS::Utilities qw(
   valid_proto_string
   process_typemaps
   make_targetable
+  map_type
 );
 
 our (@ISA, @EXPORT_OK, $VERSION);
@@ -691,7 +692,7 @@ EOF
       }
       else {
         if ($ret_type ne "void") {
-          print "\t" . &map_type($ret_type, 'RETVAL') . ";\n"
+          print "\t" . &map_type($ret_type, 'RETVAL', $hiertype) . ";\n"
             if !$retvaldone;
           $args_match{"RETVAL"} = 0;
           $var_types{"RETVAL"} = $ret_type;
@@ -1134,11 +1135,11 @@ sub INPUT_handler {
     # one can use 2-args map_type() unconditionally.
     if ($var_type =~ / \( \s* \* \s* \) /x) {
       # Function pointers are not yet supported with &output_init!
-      print "\t" . &map_type($var_type, $var_name);
+      print "\t" . &map_type($var_type, $var_name, $hiertype);
       $printed_name = 1;
     }
     else {
-      print "\t" . &map_type($var_type);
+      print "\t" . &map_type($var_type, undef, $hiertype);
       $printed_name = 0;
     }
     $var_num = $args_match{$var_name};
@@ -1881,23 +1882,6 @@ sub generate_output {
       print "\tSvSETMAGIC($arg);\n" if $do_setmagic;
     }
   }
-}
-
-sub map_type {
-  my($type, $varname) = @_;
-
-  # C++ has :: in types too so skip this
-  $type =~ tr/:/_/ unless $hiertype;
-  $type =~ s/^array\(([^,]*),(.*)\).*/$1 */s;
-  if ($varname) {
-    if ($varname && $type =~ / \( \s* \* (?= \s* \) ) /xg) {
-      (substr $type, pos $type, 0) = " $varname ";
-    }
-    else {
-      $type .= "\t$varname";
-    }
-  }
-  $type;
 }
 
 1;
