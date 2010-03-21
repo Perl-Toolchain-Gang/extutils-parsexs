@@ -1776,7 +1776,7 @@ sub generate_init {
     }
     else {
       eval qq/print "\\t$var;\\n"/;
-      warn $@   if  $@;
+      warn $@ if $@;
     }
     if ($defaults{$var} eq 'NO_INIT') {
       $deferred .= eval qq/"\\n\\tif (items >= $num) {\\n$expr;\\n\\t}\\n"/;
@@ -1784,7 +1784,7 @@ sub generate_init {
     else {
       $deferred .= eval qq/"\\n\\tif (items < $num)\\n\\t    $var = $defaults{$var};\\n\\telse {\\n$expr;\\n\\t}\\n"/;
     }
-    warn $@   if  $@;
+    warn $@ if $@;
   }
   elsif ($ScopeThisXSUB or $expr !~ /^\s*\$var =/) {
     if ($printed_name) {
@@ -1792,16 +1792,16 @@ sub generate_init {
     }
     else {
       eval qq/print "\\t$var;\\n"/;
-      warn $@   if  $@;
+      warn $@ if $@;
     }
     $deferred .= eval qq/"\\n$expr;\\n"/;
-    warn $@   if  $@;
+    warn $@ if $@;
   }
   else {
     die "panic: do not know how to handle this branch for function pointers"
       if $printed_name;
     eval qq/print "$expr;\\n"/;
-    warn $@   if  $@;
+    warn $@ if $@;
   }
 }
 
@@ -1838,7 +1838,7 @@ sub generate_output {
       $subexpr =~ s/\n\t/\n\t\t/g;
       $expr =~ s/DO_ARRAY_ELEM\n/$subexpr/;
       eval "print qq\a$expr\a";
-      warn $@   if  $@;
+      warn $@ if $@;
       print "\t\tSvSETMAGIC(ST(ix_$var));\n" if $do_setmagic;
     }
     elsif ($var eq 'RETVAL') {
@@ -1846,7 +1846,7 @@ sub generate_output {
         # We expect that $arg has refcnt 1, so we need to
         # mortalize it.
         eval "print qq\a$expr\a";
-        warn $@   if  $@;
+        warn $@ if $@;
         print "\tsv_2mortal(ST($num));\n";
         print "\tSvSETMAGIC(ST($num));\n" if $do_setmagic;
       }
@@ -1854,7 +1854,7 @@ sub generate_output {
         # We expect that $arg has refcnt >=1, so we need
         # to mortalize it!
         eval "print qq\a$expr\a";
-        warn $@   if  $@;
+        warn $@ if $@;
         print "\tsv_2mortal(ST(0));\n";
         print "\tSvSETMAGIC(ST(0));\n" if $do_setmagic;
       }
@@ -1865,7 +1865,7 @@ sub generate_output {
         # works too.
         print "\tST(0) = sv_newmortal();\n";
         eval "print qq\a$expr\a";
-        warn $@   if  $@;
+        warn $@ if $@;
         # new mortals don't have set magic
       }
     }
@@ -1873,12 +1873,12 @@ sub generate_output {
       print "\tPUSHs(sv_newmortal());\n";
       $arg = "ST($num)";
       eval "print qq\a$expr\a";
-      warn $@   if  $@;
+      warn $@ if $@;
       print "\tSvSETMAGIC($arg);\n" if $do_setmagic;
     }
     elsif ($arg =~ /^ST\(\d+\)$/) {
       eval "print qq\a$expr\a";
-      warn $@   if  $@;
+      warn $@ if $@;
       print "\tSvSETMAGIC($arg);\n" if $do_setmagic;
     }
   }
