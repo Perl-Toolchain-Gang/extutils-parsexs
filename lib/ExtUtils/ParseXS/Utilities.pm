@@ -14,6 +14,7 @@ our (@ISA, @EXPORT_OK);
   C_string
   valid_proto_string
   process_typemaps
+  process_single_typemap
   make_targetable
   map_type
 );
@@ -286,7 +287,8 @@ sub process_typemaps {
 
   push @tm, standard_typemap_locations( \@INC );
 
-  my ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref);
+  my ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref)
+    = ( {}, {}, {}, {} );
 
   foreach my $typemap (@tm) {
     next unless -f $typemap;
@@ -296,7 +298,6 @@ sub process_typemaps {
     ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref) =
       process_single_typemap( $typemap,
         $type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref);
-    return ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref);
   }
   return ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref);
 }
@@ -323,18 +324,25 @@ sub process_single_typemap {
     }
     if ($mode eq 'Typemap') {
       chomp;
-      my $line = $_;
+      my $logged_line = $_;
       trim_whitespace($_);
       # skip blank lines
       next if /^$/;
-      my($type,$kind, $proto) = /^\s*(.*?\S)\s+(\S+)\s*($ExtUtils::ParseXS::Constants::proto_re*)\s*$/ or
-        warn("Warning: File '$typemap' Line $. '$line' TYPEMAP entry needs 2 or 3 columns\n"), next;
+      my($type,$kind, $proto) =
+        m/^\s*(.*?\S)\s+(\S+)\s*($ExtUtils::ParseXS::Constants::proto_re*)\s*$/
+          or warn(
+            "Warning: File '$typemap' Line $.  '$logged_line' " .
+            "TYPEMAP entry needs 2 or 3 columns\n"
+          ),
+          next;
       $type = tidy_type($type);
       $type_kind_ref->{$type} = $kind;
       # prototype defaults to '$'
       $proto = "\$" unless $proto;
-      warn("Warning: File '$typemap' Line $. '$line' Invalid prototype '$proto'\n")
-        unless valid_proto_string($proto);
+#      warn(
+#          "Warning: File '$typemap' Line $. '$logged_line' " .
+#          "Invalid prototype '$proto'\n"
+#      ) unless valid_proto_string($proto);
       $proto_letter_ref->{$type} = C_string($proto);
     }
     elsif (/^\s/) {
