@@ -31,8 +31,8 @@ our $VERSION = '3';
 $VERSION = eval $VERSION if $VERSION =~ /_/;
 
 our (
-  @InitFileCode, $FH, $proto_re, $Overload, $errors, $Fallback, 
-  $hiertype, $WantPrototypes, $WantVersionChk, $WantLineNumbers, $filepathname, 
+  @InitFileCode, $FH, 
+  $WantPrototypes, $WantVersionChk, $WantLineNumbers, $filepathname, 
   $dir, $filename, %IncludedFiles, %input_expr, %output_expr, 
   %type_kind, %proto_letter, $BLOCK_re, $lastline, $lastline_no, $Package, 
   $Prefix, @line, %args_match, %defaults, %var_types, %arg_list, @proto_arg,
@@ -87,16 +87,15 @@ sub process_file {
   my $cpp_next_tmp = 'XSubPPtmpAAAA';
   @InitFileCode = @ExtUtils::ParseXS::Constants::InitFileCode;
   $FH           = $ExtUtils::ParseXS::Constants::FH;
-  $proto_re     = $ExtUtils::ParseXS::Constants::proto_re;
-  $Overload     = $ExtUtils::ParseXS::Constants::Overload;
-  $errors       = $ExtUtils::ParseXS::Constants::errors;
-  $Fallback     = $ExtUtils::ParseXS::Constants::Fallback;
+  $self->{Overload}     = $ExtUtils::ParseXS::Constants::Overload;
+  $self->{errors}       = $ExtUtils::ParseXS::Constants::errors;
+  $self->{Fallback}     = $ExtUtils::ParseXS::Constants::Fallback;
 
   # Most of the 1500 lines below uses these globals.  We'll have to
   # clean this up sometime, probably.  For now, we just pull them out
   # of %args.  -Ken
 
-  $hiertype = $args{hiertype};
+  $self->{hiertype} = $args{hiertype};
   $WantPrototypes = $args{prototypes};
   $WantVersionChk = $args{versioncheck};
   $WantLineNumbers = $args{linenumbers};
@@ -701,7 +700,7 @@ EOF
       }
       else {
         if ($ret_type ne "void") {
-          print "\t" . &map_type($ret_type, 'RETVAL', $hiertype) . ";\n"
+          print "\t" . &map_type($ret_type, 'RETVAL', $self->{hiertype}) . ";\n"
             if !$retvaldone;
           $args_match{"RETVAL"} = 0;
           $var_types{"RETVAL"} = $ret_type;
@@ -954,7 +953,7 @@ EOF
     }
   } # END 'PARAGRAPH' 'while' loop
 
-  if ($Overload) { # make it findable with fetchmethod
+  if ($self->{Overload}) { # make it findable with fetchmethod
     print Q(<<"EOF");
 #XS(XS_${Packid}_nil); /* prototype to pass -Wmissing-prototypes */
 #XS(XS_${Packid}_nil)
@@ -1025,7 +1024,7 @@ EOF
 #
 EOF
 
-  print Q(<<"EOF") if ($Overload);
+  print Q(<<"EOF") if ($self->{Overload});
 #    /* register the overloading (type 'A') magic */
 #    PL_amagic_generation++;
 #    /* The magic for overload gets a GV* via gv_fetchmeth as */
@@ -1033,7 +1032,7 @@ EOF
 #    /* the "fallback" status. */
 #    sv_setsv(
 #        get_sv( "${Package}::()", TRUE ),
-#        $Fallback
+#        $self->{Fallback}
 #    );
 EOF
 
@@ -1074,8 +1073,7 @@ EOF
   return 1;
 }
 
-#sub errors { $errors }
-sub report_error_count { $errors }
+sub report_error_count { $self->{errors} }
 
 # Input:  ($_, @line) == unparsed input.
 # Output: ($_, @line) == (rest of line, following lines).
@@ -1170,11 +1168,11 @@ sub INPUT_handler {
     # one can use 2-args map_type() unconditionally.
     if ($var_type =~ / \( \s* \* \s* \) /x) {
       # Function pointers are not yet supported with &output_init!
-      print "\t" . &map_type($var_type, $var_name, $hiertype);
+      print "\t" . &map_type($var_type, $var_name, $self->{hiertype});
       $printed_name = 1;
     }
     else {
-      print "\t" . &map_type($var_type, undef, $hiertype);
+      print "\t" . &map_type($var_type, undef, $self->{hiertype});
       $printed_name = 0;
     }
     $var_num = $args_match{$var_name};
@@ -1351,7 +1349,7 @@ sub OVERLOAD_handler() {
     next unless /\S/;
     trim_whitespace($_);
     while ( s/^\s*([\w:"\\)\+\-\*\/\%\<\>\.\&\|\^\!\~\{\}\=]+)\s*//) {
-      $Overload = 1 unless $Overload;
+      $self->{Overload} = 1 unless $self->{Overload};
       my $overload = "$Package\::(".$1;
       push(@InitFileCode,
        "        (void)${newXS}(\"$overload\", XS_$Full_func_name, file$proto);\n");
@@ -1373,7 +1371,7 @@ sub FALLBACK_handler() {
   # check for valid FALLBACK value
   death ("Error: FALLBACK: TRUE/FALSE/UNDEF") unless exists $map{uc $_};
 
-  $Fallback = $map{uc $_};
+  $self->{Fallback} = $map{uc $_};
 }
 
 
@@ -1795,7 +1793,7 @@ sub generate_init {
       if defined $defaults{$var};
     return;
   }
-  $type =~ tr/:/_/ unless $hiertype;
+  $type =~ tr/:/_/ unless $self->{hiertype};
   blurt("Error: No INPUT definition for type '$type', typekind '$type_kind{$type}' found"), return
     unless defined $input_expr{$tk};
   my $expr = $input_expr{$tk};
@@ -1948,7 +1946,7 @@ sub Warn {
 
 sub blurt {
   Warn @_;
-  $errors++
+  $self->{errors}++
 }
 
 sub death {
