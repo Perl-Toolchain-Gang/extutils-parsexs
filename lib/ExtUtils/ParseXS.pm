@@ -1075,6 +1075,8 @@ EOF
   return 1;
 }
 
+sub errors { $errors }
+
 # Input:  ($_, @line) == unparsed input.
 # Output: ($_, @line) == (rest of line, following lines).
 # Return: the matched keyword if found, otherwise 0
