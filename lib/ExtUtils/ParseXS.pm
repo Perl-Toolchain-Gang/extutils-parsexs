@@ -31,7 +31,7 @@ our $VERSION = '3';
 $VERSION = eval $VERSION if $VERSION =~ /_/;
 
 our (
-  $ProtoUsed, @InitFileCode, $FH, $proto_re, $Overload, $errors, $Fallback, 
+  @InitFileCode, $FH, $proto_re, $Overload, $errors, $Fallback, 
   $hiertype, $WantPrototypes, $WantVersionChk, $WantLineNumbers, $filepathname, 
   $dir, $filename, %IncludedFiles, %input_expr, %output_expr, 
   %type_kind, %proto_letter, $BLOCK_re, $lastline, $lastline_no, $Package, 
@@ -46,12 +46,14 @@ our (
 );
 our ($DoSetMagic, $newXS, $proto, $Module_cname, $XsubAliases, $Interfaces, $var_num, );
 
+our $self = {};
+
 sub process_file {
 
   # Allow for $package->process_file(%hash) in the future
   my ($pkg, %options) = @_ % 2 ? @_ : (__PACKAGE__, @_);
 
-  $ProtoUsed = exists $options{prototypes};
+  $self->{ProtoUsed} = exists $options{prototypes};
 
   # Set defaults.
   my %args = (
@@ -1062,7 +1064,7 @@ EOF
 EOF
 
   warn("Please specify prototyping behavior for $filename (see perlxs manual)\n")
-    unless $ProtoUsed;
+    unless $self->{ProtoUsed};
 
   chdir($orig_cwd);
   select($orig_fh);
@@ -1435,7 +1437,7 @@ sub PROTOTYPE_handler () {
   # If no prototype specified, then assume empty prototype ""
   $ProtoThisXSUB = 2 unless $specified;
 
-  $ProtoUsed = 1;
+  $self->{ProtoUsed} = 1;
 }
 
 sub SCOPE_handler () {
@@ -1460,7 +1462,8 @@ sub PROTOTYPES_handler () {
 
   $WantPrototypes = 1 if $1 eq 'ENABLE';
   $WantPrototypes = 0 if $1 eq 'DISABLE';
-  $ProtoUsed = 1;
+  $self->{ProtoUsed} = 1;
+
 }
 
 sub PushXSStack {
