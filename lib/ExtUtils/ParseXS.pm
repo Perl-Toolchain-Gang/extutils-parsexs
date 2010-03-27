@@ -33,7 +33,7 @@ $VERSION = eval $VERSION if $VERSION =~ /_/;
 our (
   @InitFileCode, $FH, 
   %IncludedFiles, %input_expr, %output_expr, 
-  %type_kind, %proto_letter, $BLOCK_re, $lastline, $lastline_no, $Package, 
+  %type_kind, %proto_letter, $Package, 
   $Prefix, @line, %args_match, %defaults, %var_types, %arg_list, @proto_arg,
   $processing_arg_with_types, %argtype_seen, %in_out, %lengthof, 
   $proto_in_this_xsub, $scope_in_this_xsub, $interface, 
@@ -164,7 +164,7 @@ sub process_file {
   my $END = "!End!\n\n";        # "impossible" keyword (multiple newline)
 
   # Match an XS keyword
-  $BLOCK_re = '\s*(' .
+  $self->{BLOCK_re} = '\s*(' .
     join('|' => @ExtUtils::ParseXS::Constants::keywords) .
     "|$END)\\s*:";
 
@@ -231,7 +231,7 @@ EOM
       # of the problem, and as we haven't yet read any lines &death won't
       # show the correct line in the message either.
       die ("Error: Unterminated pod in $self->{filename}, line $podstartline\n")
-        unless $lastline;
+        unless $self->{lastline};
     }
     last if ($Package, $Prefix) =
       /^MODULE\s*=\s*[\w:]+(?:\s+PACKAGE\s*=\s*([\w:]+))?(?:\s+PREFIX\s*=\s*(\S+))?\s*$/;
@@ -304,8 +304,8 @@ EOF
 
   print 'ExtUtils::ParseXS::CountLines'->end_marker, "\n" if $self->{WantLineNumbers};
 
-  $lastline    = $_;
-  $lastline_no = $.;
+  $self->{lastline}    = $_;
+  $self->{lastline_no} = $.;
 
   my (@BootCode, @outlist, $prepush_done, $xsreturn, $func_header, $orig_args, );
  PARAGRAPH:
@@ -865,7 +865,7 @@ EOF
         next;
       }
       last if $_ eq "$END:";
-      death(/^$BLOCK_re/o ? "Misplaced `$1:'" : "Junk at end of function ($_)");
+      death(/^$self->{BLOCK_re}/o ? "Misplaced `$1:'" : "Junk at end of function ($_)");
     }
 
     print Q(<<"EOF") if $args{except};
@@ -1088,7 +1088,7 @@ sub print_section {
 
   print("#line ", $line_no[@line_no - @line -1], " \"$self->{filepathname}\"\n")
     if $self->{WantLineNumbers} && !/^\s*#\s*line\b/ && !/^#if XSubPPtmp/;
-  for (;  defined($_) && !/^$BLOCK_re/o;  $_ = shift(@line)) {
+  for (;  defined($_) && !/^$self->{BLOCK_re}/o;  $_ = shift(@line)) {
     print "$_\n";
   }
   print 'ExtUtils::ParseXS::CountLines'->end_marker, "\n" if $self->{WantLineNumbers};
@@ -1101,7 +1101,7 @@ sub merge_section {
     $_ = shift(@line);
   }
 
-  for (;  defined($_) && !/^$BLOCK_re/o;  $_ = shift(@line)) {
+  for (;  defined($_) && !/^$self->{BLOCK_re}/o;  $_ = shift(@line)) {
     $in .= "$_\n";
   }
   chomp $in;
@@ -1128,7 +1128,7 @@ sub CASE_handler {
 }
 
 sub INPUT_handler {
-  for (;  !/^$BLOCK_re/o;  $_ = shift(@line)) {
+  for (;  !/^$self->{BLOCK_re}/o;  $_ = shift(@line)) {
     last if /^\s*NOT_IMPLEMENTED_YET/;
     next unless /\S/;        # skip blank lines
 
@@ -1214,7 +1214,7 @@ sub INPUT_handler {
 }
 
 sub OUTPUT_handler {
-  for (;  !/^$BLOCK_re/o;  $_ = shift(@line)) {
+  for (;  !/^$self->{BLOCK_re}/o;  $_ = shift(@line)) {
     next unless /\S/;
     if (/^\s*SETMAGIC\s*:\s*(ENABLE|DISABLE)\s*/) {
       $DoSetMagic = ($1 eq "ENABLE" ? 1 : 0);
@@ -1328,7 +1328,7 @@ sub GetAliases {
 }
 
 sub ATTRS_handler () {
-  for (;  !/^$BLOCK_re/o;  $_ = shift(@line)) {
+  for (;  !/^$self->{BLOCK_re}/o;  $_ = shift(@line)) {
     next unless /\S/;
     trim_whitespace($_);
     push @Attributes, $_;
@@ -1336,7 +1336,7 @@ sub ATTRS_handler () {
 }
 
 sub ALIAS_handler () {
-  for (;  !/^$BLOCK_re/o;  $_ = shift(@line)) {
+  for (;  !/^$self->{BLOCK_re}/o;  $_ = shift(@line)) {
     next unless /\S/;
     trim_whitespace($_);
     GetAliases($_) if $_;
@@ -1344,7 +1344,7 @@ sub ALIAS_handler () {
 }
 
 sub OVERLOAD_handler() {
-  for (;  !/^$BLOCK_re/o;  $_ = shift(@line)) {
+  for (;  !/^$self->{BLOCK_re}/o;  $_ = shift(@line)) {
     next unless /\S/;
     trim_whitespace($_);
     while ( s/^\s*([\w:"\\)\+\-\*\/\%\<\>\.\&\|\^\!\~\{\}\=]+)\s*//) {
@@ -1412,7 +1412,7 @@ sub PROTOTYPE_handler () {
   death("Error: Only 1 PROTOTYPE definition allowed per xsub")
     if $proto_in_this_xsub++;
 
-  for (;  !/^$BLOCK_re/o;  $_ = shift(@line)) {
+  for (;  !/^$self->{BLOCK_re}/o;  $_ = shift(@line)) {
     next unless /\S/;
     $specified = 1;
     trim_whitespace($_);
@@ -1468,8 +1468,8 @@ sub PushXSStack {
   # Save the current file context.
   push(@XSStack, {
           type            => 'file',
-          LastLine        => $lastline,
-          LastLineNo      => $lastline_no,
+          LastLine        => $self->{lastline},
+          LastLineNo      => $self->{lastline_no},
           Line            => \@line,
           LineNo          => \@line_no,
           Filename        => $self->{filename},
@@ -1531,8 +1531,8 @@ EOF
     last unless /^\s*$/;
   }
 
-  $lastline = $_;
-  $lastline_no = $.;
+  $self->{lastline} = $_;
+  $self->{lastline_no} = $.;
 }
 
 sub QuoteArgs {
@@ -1588,8 +1588,8 @@ EOF
     last unless /^\s*$/;
   }
 
-  $lastline = $_;
-  $lastline_no = $.;
+  $self->{lastline} = $_;
+  $self->{lastline_no} = $.;
 }
 
 sub PopFile() {
@@ -1610,14 +1610,14 @@ sub PopFile() {
   # #line directives.
   $self->{filename}   = $data->{Filename};
   $self->{filepathname} = $data->{Filepathname};
-  $lastline   = $data->{LastLine};
-  $lastline_no = $data->{LastLineNo};
+  $self->{lastline}   = $data->{LastLine};
+  $self->{lastline_no} = $data->{LastLineNo};
   @line       = @{ $data->{Line} };
   @line_no    = @{ $data->{LineNo} };
 
   if ($isPipe and $? ) {
-    --$lastline_no;
-    print STDERR "Error reading from pipe '$ThisFile': $! in $self->{filename}, line $lastline_no\n" ;
+    --$self->{lastline_no};
+    print STDERR "Error reading from pipe '$ThisFile': $! in $self->{filename}, line $self->{lastline_no}\n" ;
     exit 1;
   }
 
@@ -1665,12 +1665,12 @@ sub Q {
 sub fetch_para {
   # parse paragraph
   death ("Error: Unterminated `#if/#ifdef/#ifndef'")
-    if !defined $lastline && $XSStack[-1]{type} eq 'if';
+    if !defined $self->{lastline} && $XSStack[-1]{type} eq 'if';
   @line = ();
   @line_no = ();
-  return PopFile() if !defined $lastline;
+  return PopFile() if !defined $self->{lastline};
 
-  if ($lastline =~
+  if ($self->{lastline} =~
       /^MODULE\s*=\s*([\w:]+)(?:\s+PACKAGE\s*=\s*([\w:]+))?(?:\s+PREFIX\s*=\s*(\S+))?\s*$/) {
     my $Module = $1;
     $Package = defined($2) ? $2 : ''; # keep -w happy
@@ -1680,42 +1680,42 @@ sub fetch_para {
     ($Packid = $Package) =~ tr/:/_/;
     $Packprefix = $Package;
     $Packprefix .= "::" if $Packprefix ne "";
-    $lastline = "";
+    $self->{lastline} = "";
   }
 
   for (;;) {
     # Skip embedded PODs
-    while ($lastline =~ /^=/) {
-      while ($lastline = <$FH>) {
-        last if ($lastline =~ /^=cut\s*$/);
+    while ($self->{lastline} =~ /^=/) {
+      while ($self->{lastline} = <$FH>) {
+        last if ($self->{lastline} =~ /^=cut\s*$/);
       }
-      death ("Error: Unterminated pod") unless $lastline;
-      $lastline = <$FH>;
-      chomp $lastline;
-      $lastline =~ s/^\s+$//;
+      death ("Error: Unterminated pod") unless $self->{lastline};
+      $self->{lastline} = <$FH>;
+      chomp $self->{lastline};
+      $self->{lastline} =~ s/^\s+$//;
     }
-    if ($lastline !~ /^\s*#/ ||
+    if ($self->{lastline} !~ /^\s*#/ ||
     # CPP directives:
     #    ANSI:    if ifdef ifndef elif else endif define undef
     #        line error pragma
     #    gcc:    warning include_next
     #   obj-c:    import
     #   others:    ident (gcc notes that some cpps have this one)
-    $lastline =~ /^#[ \t]*(?:(?:if|ifn?def|elif|else|endif|define|undef|pragma|error|warning|line\s+\d+|ident)\b|(?:include(?:_next)?|import)\s*["<].*[>"])/) {
-      last if $lastline =~ /^\S/ && @line && $line[-1] eq "";
-      push(@line, $lastline);
-      push(@line_no, $lastline_no);
+    $self->{lastline} =~ /^#[ \t]*(?:(?:if|ifn?def|elif|else|endif|define|undef|pragma|error|warning|line\s+\d+|ident)\b|(?:include(?:_next)?|import)\s*["<].*[>"])/) {
+      last if $self->{lastline} =~ /^\S/ && @line && $line[-1] eq "";
+      push(@line, $self->{lastline});
+      push(@line_no, $self->{lastline_no});
     }
 
     # Read next line and continuation lines
-    last unless defined($lastline = <$FH>);
-    $lastline_no = $.;
+    last unless defined($self->{lastline} = <$FH>);
+    $self->{lastline_no} = $.;
     my $tmp_line;
-    $lastline .= $tmp_line
-      while ($lastline =~ /\\$/ && defined($tmp_line = <$FH>));
+    $self->{lastline} .= $tmp_line
+      while ($self->{lastline} =~ /\\$/ && defined($tmp_line = <$FH>));
 
-    chomp $lastline;
-    $lastline =~ s/^\s+$//;
+    chomp $self->{lastline};
+    $self->{lastline} =~ s/^\s+$//;
   }
   pop(@line), pop(@line_no) while @line && $line[-1] eq "";
   1;
