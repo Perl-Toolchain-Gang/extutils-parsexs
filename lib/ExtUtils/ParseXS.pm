@@ -36,7 +36,7 @@ our (
   %type_kind, %proto_letter, $Package, 
   @line, %args_match, %defaults, %var_types, %arg_list, @proto_arg,
   %argtype_seen, %in_out, %lengthof, 
-  @line_no, $func_name, $Full_func_name, $Packprefix, $Packid,  
+  @line_no, $Full_func_name, $Packprefix, $Packid,  
   %XsubAliases, %XsubAliasValues, %Interfaces, @Attributes, %outargs, $pname,
   $thisdone, $retvaldone, $deferred, $gotRETVAL, $condnum, $cond,
   $RETVAL_code, $printed_name, $func_args, @XSStack, $ALIAS, 
@@ -420,11 +420,11 @@ EOF
     blurt ("Error: Cannot parse function definition from '$func_header'"), next PARAGRAPH
       unless $func_header =~ /^(?:([\w:]*)::)?(\w+)\s*\(\s*(.*?)\s*\)\s*(const)?\s*(;\s*)?$/s;
 
-    ($class, $func_name, $orig_args) =  ($1, $2, $3);
+    ($class, $self->{func_name}, $orig_args) =  ($1, $2, $3);
     $class = "$4 $class" if $4;
-    ($pname = $func_name) =~ s/^($self->{Prefix})?/$Packprefix/;
+    ($pname = $self->{func_name}) =~ s/^($self->{Prefix})?/$Packprefix/;
     my $clean_func_name;
-    ($clean_func_name = $func_name) =~ s/^$self->{Prefix}//;
+    ($clean_func_name = $self->{func_name}) =~ s/^$self->{Prefix}//;
     $Full_func_name = "${Packid}_$clean_func_name";
     if ($Is_VMS) {
       $Full_func_name = $SymSet->addsym($Full_func_name);
@@ -507,7 +507,7 @@ EOF
       }
     }
     if (defined($class)) {
-      my $arg0 = ((defined($static) or $func_name eq 'new')
+      my $arg0 = ((defined($static) or $self->{func_name} eq 'new')
           ? "CLASS" : "THIS");
       unshift(@args, $arg0);
     }
@@ -668,7 +668,7 @@ EOF
 EOF
 
       if (!$thisdone && defined($class)) {
-        if (defined($static) or $func_name eq 'new') {
+        if (defined($static) or $self->{func_name} eq 'new') {
           print "\tchar *";
           $var_types{"CLASS"} = "char *";
           generate_init( {
@@ -724,7 +724,7 @@ EOF
         elsif (check_keyword("CODE")) {
           print_section();
         }
-        elsif (defined($class) and $func_name eq "DESTROY") {
+        elsif (defined($class) and $self->{func_name} eq "DESTROY") {
           print "\n\t";
           print "delete THIS;\n";
         }
@@ -735,25 +735,25 @@ EOF
             $wantRETVAL = 1;
           }
           if (defined($static)) {
-            if ($func_name eq 'new') {
-              $func_name = "$class";
+            if ($self->{func_name} eq 'new') {
+              $self->{func_name} = "$class";
             }
             else {
               print "${class}::";
             }
           }
           elsif (defined($class)) {
-            if ($func_name eq 'new') {
-              $func_name .= " $class";
+            if ($self->{func_name} eq 'new') {
+              $self->{func_name} .= " $class";
             }
             else {
               print "THIS->";
             }
           }
-          $func_name =~ s/^\Q$args{'s'}//
+          $self->{func_name} =~ s/^\Q$args{'s'}//
             if exists $args{'s'};
-          $func_name = 'XSFUNCTION' if $self->{interface};
-          print "$func_name($func_args);\n";
+          $self->{func_name} = 'XSFUNCTION' if $self->{interface};
+          print "$self->{func_name}($func_args);\n";
         }
       }
 
@@ -1782,7 +1782,7 @@ sub generate_init {
   my $subtype;
   ($subtype = $ntype) =~ s/(?:Array)?(?:Ptr)?$//;
   $tk = $type_kind{$type};
-  $tk =~ s/OBJ$/REF/ if $func_name =~ /DESTROY$/;
+  $tk =~ s/OBJ$/REF/ if $self->{func_name} =~ /DESTROY$/;
   if ($tk eq 'T_PV' and exists $lengthof{$var}) {
     print "\t$var" unless $printed_name;
     print " = ($type)SvPV($arg, STRLEN_length_of_$var);\n";
