@@ -14,3 +14,5 @@
 /PM_to_blib
 /MYMETA.yml
 /ExtUtils-ParseXS*
+.*.swp
+.*.swo
