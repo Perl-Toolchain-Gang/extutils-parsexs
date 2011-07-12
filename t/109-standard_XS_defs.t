@@ -1,12 +1,13 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Capture::Tiny qw( capture );
-use Test::More qw(no_plan); # tests =>  7;
-use lib qw( lib );
+$| = 1;
+use Test::More tests => 5;
+use lib qw( lib t/lib );
 use ExtUtils::ParseXS::Utilities qw(
     standard_XS_defs
 );
+use PrimitiveCapture;
 
 my @statements = (
     '#ifndef PERL_UNUSED_VAR',
@@ -15,10 +16,9 @@ my @statements = (
     '#ifdef newXS_flags',
 );
 
-my ($stdout, $stderr);
-($stdout, $stderr) = capture{
-    standard_XS_defs();
-};
+my $stdout = PrimitiveCapture::capture_stdout(sub {
+  standard_XS_defs();
+});
 
 foreach my $s (@statements) {
     like( $stdout, qr/$s/s, "Printed <$s>" );

@@ -5,6 +5,7 @@ use Exporter;
 use File::Spec;
 use lib qw( lib );
 use ExtUtils::ParseXS::Constants ();
+
 our (@ISA, @EXPORT_OK);
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(
@@ -14,7 +15,6 @@ our (@ISA, @EXPORT_OK);
   C_string
   valid_proto_string
   process_typemaps
-  process_single_typemap
   make_targetable
   map_type
   standard_XS_defs
@@ -22,6 +22,7 @@ our (@ISA, @EXPORT_OK);
   analyze_preprocessor_statements
   set_cond
   Warn
+  current_line_number
   blurt
   death
   check_conditional_preprocessor_statements
@@ -40,7 +41,6 @@ ExtUtils::ParseXS::Utilities - Subroutines used with ExtUtils::ParseXS
     C_string
     valid_proto_string
     process_typemaps
-    process_single_typemap
     make_targetable
     map_type
     standard_XS_defs
@@ -262,7 +262,7 @@ Upon failure, returns C<0>.
 sub valid_proto_string {
   my($string) = @_;
 
-  if ( $string =~ /^$ExtUtils::ParseXS::Constants::proto_re+$/ ) {
+  if ( $string =~ /^$ExtUtils::ParseXS::Constants::PrototypeRegexp+$/ ) {
     return $string;
   }
 
@@ -279,84 +279,14 @@ Process all typemap files.
 
 =item * Arguments
 
-  my ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref) =
-    process_typemaps( $args{typemap}, $pwd );
+  my $typemaps_object = process_typemaps( $args{typemap}, $pwd );
       
 List of two elements:  C<typemap> element from C<%args>; current working
 directory.
 
 =item * Return Value
 
-Upon success, returns a list of four hash references.  (This will probably be
-refactored.)  Here is a I<rough> description of what is in these hashrefs:
-
-=over 4
-
-=item * C<$type_kind_ref>
-
-  {
-    'char **' => 'T_PACKEDARRAY',
-    'bool_t' => 'T_IV',
-    'AV *' => 'T_AVREF',
-    'InputStream' => 'T_IN',
-    'double' => 'T_DOUBLE',
-    # ...
-  }
-
-Keys:  C types.  Values:  Corresponding Perl types.
-
-=item * C<$proto_letter_ref>
-
-  {
-    'char **' => '$',
-    'bool_t' => '$',
-    'AV *' => '$',
-    'InputStream' => '$',
-    'double' => '$',
-    # ...
-  }
-
-Keys: C types.  Values. Corresponding prototype letters.
-
-=item * C<$input_expr_ref>
-
-  {
-    'T_CALLBACK' => '	$var = make_perl_cb_$type($arg)
-  ',
-    'T_OUT' => '	$var = IoOFP(sv_2io($arg))
-  ',
-    'T_REF_IV_PTR' => '	if (sv_isa($arg, \\"${ntype}\\")) {
-    # ...
-  }
-
-Keys:  Perl API calls B<CONFIRM!>.  Values:  Newline-terminated strings that
-will be written to C source code (F<.c>) files.   The strings are C code, but
-with Perl variables whose values will be interpolated at F<xsubpp>'s runtime
-by one of the C<eval EXPR> statements in ExtUtils::ParseXS.
-
-=item * C<$output_expr_ref>
-
-  {
-    'T_CALLBACK' => '	sv_setpvn($arg, $var.context.value().chp(),
-  		$var.context.value().size());
-  ',
-    'T_OUT' => '	{
-  	    GV *gv = newGVgen("$Package");
-  	    if ( do_open(gv, "+>&", 3, FALSE, 0, 0, $var) )
-  		sv_setsv($arg, sv_bless(newRV((SV*)gv), gv_stashpv("$Package",1)));
-  	    else
-  		$arg = &PL_sv_undef;
-  	}
-  ',
-    # ...
-  }
-
-Keys:  Perl API calls B<CONFIRM!>.  Values:  Newline-terminated strings that
-will be written to C source code (F<.c>) files.   The strings are C code, but
-with Perl variables whose values will be interpolated at F<xsubpp>'s runtime
-by one of the C<eval EXPR> statements in ExtUtils::ParseXS.
-
-=back
+Upon success, returns an L<ExtUtils::Typemaps> object.
 
 =back
 
@@ -373,101 +303,18 @@ sub process_typemaps {
 
   push @tm, standard_typemap_locations( \@INC );
 
-  my ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref)
-    = ( {}, {}, {}, {} );
-
-  foreach my $typemap (@tm) {
-    next unless -f $typemap;
+  require ExtUtils::Typemaps;
+  my $typemap = ExtUtils::Typemaps->new;
+  foreach my $typemap_loc (@tm) {
+    next unless -f $typemap_loc;
     # skip directories, binary files etc.
-    warn("Warning: ignoring non-text typemap file '$typemap'\n"), next
-      unless -T $typemap;
-    ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref) =
-      process_single_typemap( $typemap,
-        $type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref);
+    warn("Warning: ignoring non-text typemap file '$typemap_loc'\n"), next
+      unless -T $typemap_loc;
+
+    $typemap->merge(file => $typemap_loc, replace => 1);
   }
-  return ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref);
-}
 
-=head2 C<process_single_typemap()>
-
-=over 4
-
-=item * Purpose
-
-Process a single typemap within C<process_typemaps()>.
-
-=item * Arguments
-
-    ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref) =
-      process_single_typemap( $typemap,
-        $type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref);
-
-List of five elements:  The individual typemap needing processing and four
-references.
-
-=item * Return Value
-
-List of four references -- modified versions of those passed in as arguments.
-
-=back
-
-=cut
-
-sub process_single_typemap {
-  my ($typemap,
-    $type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref) = @_;
-  open my $TYPEMAP, '<', $typemap
-    or warn ("Warning: could not open typemap file '$typemap': $!\n"), next;
-  my $mode = 'Typemap';
-  my $junk = "";
-  my $current = \$junk;
-  while (<$TYPEMAP>) {
-    # skip comments
-    next if /^\s*#/;
-    if (/^INPUT\s*$/) {
-      $mode = 'Input';   $current = \$junk;  next;
-    }
-    if (/^OUTPUT\s*$/) {
-      $mode = 'Output';  $current = \$junk;  next;
-    }
-    if (/^TYPEMAP\s*$/) {
-      $mode = 'Typemap'; $current = \$junk;  next;
-    }
-    if ($mode eq 'Typemap') {
-      chomp;
-      my $logged_line = $_;
-      trim_whitespace($_);
-      # skip blank lines
-      next if /^$/;
-      my($type,$kind, $proto) =
-        m/^\s*(.*?\S)\s+(\S+)\s*($ExtUtils::ParseXS::Constants::proto_re*)\s*$/
-          or warn(
-            "Warning: File '$typemap' Line $.  '$logged_line' " .
-            "TYPEMAP entry needs 2 or 3 columns\n"
-          ),
-          next;
-      $type = tidy_type($type);
-      $type_kind_ref->{$type} = $kind;
-      # prototype defaults to '$'
-      $proto = "\$" unless $proto;
-      $proto_letter_ref->{$type} = C_string($proto);
-    }
-    elsif (/^\s/) {
-      $$current .= $_;
-    }
-    elsif ($mode eq 'Input') {
-      s/\s+$//;
-      $input_expr_ref->{$_} = '';
-      $current = \$input_expr_ref->{$_};
-    }
-    else {
-      s/\s+$//;
-      $output_expr_ref->{$_} = '';
-      $current = \$output_expr_ref->{$_};
-    }
-  }
-  close $TYPEMAP;
-  return ($type_kind_ref, $proto_letter_ref, $input_expr_ref, $output_expr_ref);
+  return $typemap;
 }
 
 =head2 C<make_targetable()>
@@ -495,11 +342,26 @@ Hash.
 
 sub make_targetable {
   my $output_expr_ref = shift;
-  my ($cast, $size);
-  our $bal;
-  $bal = qr[(?:(?>[^()]+)|\((??{ $bal })\))*]; # ()-balanced
-  $cast = qr[(?:\(\s*SV\s*\*\s*\)\s*)?]; # Optional (SV*) cast
-  $size = qr[,\s* (??{ $bal }) ]x; # Third arg (to setpvn)
+
+  our $bal; # ()-balanced
+  $bal = qr[
+    (?:
+      (?>[^()]+)
+      |
+      \( (??{ $bal }) \)
+    )*
+  ]x;
+
+  # matches variations on (SV*)
+  my $sv_cast = qr[
+    (?:
+      \( \s* SV \s* \* \s* \) \s*
+    )?
+  ]x;
+
+  my $size = qr[ # Third arg (to setpvn)
+    , \s* (??{ $bal })
+  ]x;
 
   my %targetable;
   foreach my $key (keys %{ $output_expr_ref }) {
@@ -507,16 +369,20 @@ sub make_targetable {
     # available to miniperl, and does not attempt to load the XS code.
     use re 'eval';
 
-    my ($t, $with_size, $arg, $sarg) =
+    my ($type, $with_size, $arg, $sarg) =
       ($output_expr_ref->{$key} =~
-        m[^ \s+ sv_set ( [iunp] ) v (n)?    # Type, is_setpvn
-          \s* \( \s* $cast \$arg \s* ,
-          \s* ( (??{ $bal }) )    # Set from
+        m[^
+          \s+
+          sv_set([iunp])v(n)?    # Type, is_setpvn
+          \s*
+          \( \s*
+            $sv_cast \$arg \s* , \s*
+            ( (??{ $bal }) )    # Set from
           ( (??{ $size }) )?    # Possible sizeof set-from
           \) \s* ; \s* $
         ]x
     );
-    $targetable{$key} = [$t, $with_size, $arg, $sarg] if $t;
+    $targetable{$key} = [$type, $with_size, $arg, $sarg] if $type;
   }
   return %targetable;
 }
@@ -575,7 +441,7 @@ None.
 
 =item * Return Value
 
-Implicitly returns true when final C<print> statement completes.
+Returns true.
 
 =back
 
@@ -638,6 +504,7 @@ S_croak_xs_usage(pTHX_ const CV *const cv, const char *const params)
 #endif /* !defined(newXS_flags) */
 
 EOF
+  return 1;
 }
 
 =head2 C<assign_func_args()>
@@ -708,7 +575,7 @@ sub analyze_preprocessor_statements {
     push(@{ $self->{XSStack} }, {type => 'if'});
   }
   else {
-    death ("Error: `$statement' with no matching `if'")
+    $self->death("Error: `$statement' with no matching `if'")
       if $self->{XSStack}->[-1]{type} ne 'if';
     if ($self->{XSStack}->[-1]{varname}) {
       push(@{ $self->{InitFileCode} }, "#endif\n");
@@ -762,6 +629,32 @@ sub set_cond {
   return $cond;
 }
 
+=head2 C<current_line_number()>
+
+=over 4
+
+=item * Purpose
+
+Figures out the current line number in the XS file.
+
+=item * Arguments
+
+C<$self>
+
+=item * Return Value
+
+The current line number.
+
+=back
+
+=cut
+
+sub current_line_number {
+  my $self = shift;
+  my $line_number = $self->{line_no}->[@{ $self->{line_no} } - @{ $self->{line} } -1];
+  return $line_number;
+}
+
 =head2 C<Warn()>
 
 =over 4
@@ -778,9 +671,7 @@ sub set_cond {
 
 sub Warn {
   my $self = shift;
-  # work out the line number
-  my $warn_line_number = $self->{line_no}->[@{ $self->{line_no} } - @{ $self->{line} } -1];
-
+  my $warn_line_number = $self->current_line_number();
   print STDERR "@_ in $self->{filename}, line $warn_line_number\n";
 }
 
@@ -800,7 +691,7 @@ sub Warn {
 
 sub blurt {
   my $self = shift;
-  Warn($self, @_);
+  $self->Warn(@_);
   $self->{errors}++
 }
 
@@ -820,7 +711,7 @@ sub blurt {
 
 sub death {
   my $self = shift;
-  Warn($self, @_);
+  $self->Warn(@_);
   exit 1;
 }
 
@@ -848,7 +739,7 @@ sub check_conditional_preprocessor_statements {
         $cpplevel++;
       }
       elsif (!$cpplevel) {
-        Warn( $self, "Warning: #else/elif/endif without #if in this function");
+        $self->Warn("Warning: #else/elif/endif without #if in this function");
         print STDERR "    (precede it with a blank line if the matching #if is outside the function)\n"
           if $self->{XSStack}->[-1]{type} eq 'if';
         return;
@@ -857,7 +748,7 @@ sub check_conditional_preprocessor_statements {
         $cpplevel--;
       }
     }
-    Warn( $self, "Warning: #if without #endif in this function") if $cpplevel;
+    $self->Warn("Warning: #if without #endif in this function") if $cpplevel;
   }
 }
 

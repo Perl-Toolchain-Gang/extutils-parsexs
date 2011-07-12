@@ -1,11 +1,11 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+$| = 1;
 use Carp;
 use Cwd;
 use File::Spec;
 use File::Temp qw( tempdir );
-use Capture::Tiny qw( capture );
 use Test::More qw(no_plan); # tests =>  7;
 use lib qw( lib );
 use ExtUtils::ParseXS::Utilities qw(
