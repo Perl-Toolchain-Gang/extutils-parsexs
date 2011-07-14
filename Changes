@@ -1,6 +1,11 @@
 Revision history for Perl extension ExtUtils::ParseXS.
 
-3.00_01 - Tue Jul 12 22:00:00 EDT 2011
+3.00_02 - Thu Jul 14 18:00:00 CET 2011
+
+  - Move script/xsubpp back to lib/ExtUtils/xsubpp
+    The original move caused old xsubpp's to be used.
+
+3.00_01 - Tue Jul 12 22:00:00 CET 2011
 
   - Major refactoring of the whole code base.
     It finally runs under 'use strict' for the first time!
