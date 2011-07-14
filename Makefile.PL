@@ -17,6 +17,6 @@ WriteMakefile(
     (ABSTRACT_FROM  => 'lib/ExtUtils/ParseXS.pod',
      AUTHOR         => 'Ken Williams <ken@mathforum.org>') : ()),
   'INSTALLDIRS' => ($] < 5.008009 ? 'site' : 'perl'),
-  'EXE_FILES' => ['script/xsubpp'],
+  #'EXE_FILES' => ['script/xsubpp'],
   'PL_FILES' => {}
 );
