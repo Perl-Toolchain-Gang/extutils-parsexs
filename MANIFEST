@@ -9,12 +9,12 @@ lib/ExtUtils/Typemaps.pm
 lib/ExtUtils/Typemaps/InputMap.pm
 lib/ExtUtils/Typemaps/OutputMap.pm
 lib/ExtUtils/Typemaps/Type.pm
+lib/ExtUtils/xsubpp
 Makefile.PL
 MANIFEST			This list of files
 META.yml
 pm_to_blib
 README
-script/xsubpp
 t/001-basic.t
 t/002-more.t
 t/003-usage.t
