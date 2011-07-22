@@ -13,6 +13,7 @@
 /private
 /PM_to_blib
 /MYMETA.yml
+/MYMETA.json
 /ExtUtils-ParseXS*
 .*.swp
 .*.swo
