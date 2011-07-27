@@ -1,3 +1,6 @@
+pm_to_blib$
+MYMETA\.json$
+Makefile\.old$
 Build\.PL # AVOID CIRCULAR DEPENDENCY
 (^|/)\.
 (^|/)\.#
