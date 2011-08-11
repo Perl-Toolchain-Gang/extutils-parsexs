@@ -35,7 +35,7 @@ our @EXPORT_OK = qw(
   process_file
   report_error_count
 );
-our $VERSION = '3.03';
+our $VERSION = '3.03_01';
 $VERSION = eval $VERSION if $VERSION =~ /_/;
 
 # The scalars in the line below remain as 'our' variables because pulling
@@ -683,7 +683,7 @@ EOF
 
       # A CODE section with RETVAL, but no OUTPUT? FAIL!
       if ($self->{have_CODE_with_RETVAL} and not $self->{have_OUTPUT} and $self->{ret_type} ne 'void') {
-        $self->blurt("Error: Found a 'CODE' section which seems to be using 'RETVAL' but no 'OUTPUT' section.");
+        $self->Warn("Warning: Found a 'CODE' section which seems to be using 'RETVAL' but no 'OUTPUT' section.");
       }
 
       generate_output( {
