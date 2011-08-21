@@ -1,5 +1,10 @@
 Revision history for Perl extension ExtUtils::ParseXS.
 
+  - Properly strip trailing semicolons form inputmaps. These could
+    trigger warnings (errors in strict C89 compilers) due to
+    additional semicolons being interpreted as empty statements.
+    [Torsten Schoenfeld, Jan Dubois, Steffen Mueller]
+
   - No detects and throws a warning if there is a CODE section using
     RETVAL, but no OUTPUT section. [CPAN RT #69536]
 
@@ -14,7 +19,7 @@ Revision history for Perl extension ExtUtils::ParseXS.
 
 3.01 - Thu Aug  4 17:51:00 CET 2011
 
-  - No significant changes form 3.00_05.
+  - No significant changes from 3.00_05.
 
 3.00_05 - Wed Jul 27 22:54:00 CET 2011
 
