@@ -1,6 +1,6 @@
 Revision history for Perl extension ExtUtils::ParseXS.
 
-3.04 - Sun Aug 21 13:19:00 CET 2011
+3.03_01 - Sun Aug 21 13:19:00 CET 2011
 
   - Properly strip trailing semicolons form inputmaps. These could
     trigger warnings (errors in strict C89 compilers) due to
@@ -9,6 +9,13 @@ Revision history for Perl extension ExtUtils::ParseXS.
 
   - Now detects and throws a warning if there is a CODE section using
     RETVAL, but no OUTPUT section. [CPAN RT #69536]
+
+  - Uses the explicit XS_EXTERNAL macro (from perl 5.15.2 and newer)
+    for XSUBs that need to be exported. Defines XS_EXTERNAL to fall
+    back to XS where that is not available.
+
+  - Introduces new EXPORT_XSUB_SYMBOLS XS keyword that forces exported
+    XSUB symbols. It's a no-op on perls before 5.15.2.
 
 3.03 - Thu Aug 11 08:24:00 CET 2011
 
