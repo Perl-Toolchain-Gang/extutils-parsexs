@@ -7,7 +7,7 @@ Revision history for Perl extension ExtUtils::ParseXS.
     additional semicolons being interpreted as empty statements.
     [Torsten Schoenfeld, Jan Dubois, Steffen Mueller]
 
-  - No detects and throws a warning if there is a CODE section using
+  - Now detects and throws a warning if there is a CODE section using
     RETVAL, but no OUTPUT section. [CPAN RT #69536]
 
 3.03 - Thu Aug 11 08:24:00 CET 2011
