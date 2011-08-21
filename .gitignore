@@ -17,3 +17,6 @@
 /ExtUtils-ParseXS*
 .*.swp
 .*.swo
+t/XS*.c
+t/XS*.o
+t/XS*.so
