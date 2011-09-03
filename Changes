@@ -1,6 +1,6 @@
 Revision history for Perl extension ExtUtils::ParseXS.
 
-3.04_02 - ...
+3.04_02 - Sat Sep  3 15:28:00 CET 2011
 
   - Don't put null characters into the generated source
     file when -except is used; write the '\0' escape sequence
