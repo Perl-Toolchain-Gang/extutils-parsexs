@@ -6,7 +6,7 @@ use File::Spec;
 use lib qw( lib );
 use ExtUtils::ParseXS::Constants ();
 
-our $VERSION = '3.05';
+our $VERSION = '3.06';
 
 our (@ISA, @EXPORT_OK);
 @ISA = qw(Exporter);
@@ -494,7 +494,7 @@ sub standard_XS_defs {
 #  undef XS_INTERNAL
 #  if defined(__CYGWIN__) && defined(USE_DYNAMIC_LOADING)
 #    define XS_EXTERNAL(name) __declspec(dllexport) XSPROTO(name)
-#    define XS_INTERNAL(name) __declspec(dllexport) STATIC XSPROTO(name)
+#    define XS_INTERNAL(name) STATIC XSPROTO(name)
 #  endif
 #  if defined(__SYMBIAN32__)
 #    define XS_EXTERNAL(name) EXPORT_C XSPROTO(name)
@@ -667,7 +667,7 @@ sub analyze_preprocessor_statements {
     push(@{ $self->{XSStack} }, {type => 'if'});
   }
   else {
-    $self->death("Error: `$statement' with no matching `if'")
+    $self->death("Error: '$statement' with no matching 'if'")
       if $self->{XSStack}->[-1]{type} ne 'if';
     if ($self->{XSStack}->[-1]{varname}) {
       push(@{ $self->{InitFileCode} }, "#endif\n");
