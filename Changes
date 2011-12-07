@@ -1,5 +1,8 @@
 Revision history for Perl extension ExtUtils::ParseXS.
 
+3.07 - Wed Dec  7 14:10:00 CET 2011
+  - Fix inconsistent versioning in 3.06.
+
 3.06 - Fri Dec  2 08:10:00 CET 2011
 
   - Fix Cygwin issues [Tony Cook]
