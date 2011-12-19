@@ -11,7 +11,7 @@ use Symbol;
 
 our $VERSION;
 BEGIN {
-  $VERSION = '3.07';
+  $VERSION = '3.08';
 }
 use ExtUtils::ParseXS::Constants $VERSION;
 use ExtUtils::ParseXS::CountLines $VERSION;
@@ -1718,7 +1718,7 @@ sub fetch_para {
       my $tmapcode = join "", @tmaplines;
       my $tmap = ExtUtils::Typemaps->new(
         string => $tmapcode,
-        lineno_offset => $self->current_line_number()+1,
+        lineno_offset => ($self->current_line_number()||0)+1,
         fake_filename => $self->{filename},
       );
       $self->{typemap}->merge(typemap => $tmap, replace => 1);
