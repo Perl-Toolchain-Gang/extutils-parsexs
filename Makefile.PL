@@ -1,7 +1,7 @@
 use 5.008001;
 use strict;
 use warnings;
-use ExtUtils::MakeMaker;
+use ExtUtils::MakeMaker 6.46;
 
 use Config '%Config';
 use File::Spec;
@@ -69,7 +69,17 @@ WriteMakefile(
     'File::Basename' => 0,
     'File::Spec' => 0,
     'Symbol' => 0,
-    'Test::More' => '0.47'
+    'Test::More' => '0.47',
+    'ExtUtils::MakeMaker' => '6.46',
+  },
+  CONFIGURE_REQUIRES => {
+    'ExtUtils::MakeMaker' => '6.46',
+  },
+  META_MERGE => {
+    resources => {
+      bugtracker => 'http://rt.perl.org/rt3/',
+      repository => 'git://perl5.git.perl.org/gitroot/perl.git',
+    },
   },
   ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
     (ABSTRACT_FROM  => 'lib/ExtUtils/ParseXS.pod',
