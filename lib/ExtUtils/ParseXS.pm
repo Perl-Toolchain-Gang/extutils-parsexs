@@ -46,13 +46,45 @@ our @EXPORT_OK = qw(
   report_error_count
 );
 
-our $self = bless {} => __PACKAGE__;
+our ($C_group_rex, $C_arg);
+BEGIN {
+  # Group in C (no support for comments or literals)
+  $C_group_rex = qr/ [({\[]
+               (?: (?> [^()\[\]{}]+ ) | (??{ $C_group_rex }) )*
+               [)}\]] /x;
+  # Chunk in C without comma at toplevel (no comments):
+  $C_arg = qr/ (?: (?> [^()\[\]{},"']+ )
+         |   (??{ $C_group_rex })
+         |   " (?: (?> [^\\"]+ )
+           |   \\.
+           )* "        # String literal
+                |   ' (?: (?> [^\\']+ ) | \\. )* ' # Char literal
+         )* /xs;
+}
+
+sub new {
+  return bless {} => shift;
+}
+
+our $Singleton = __PACKAGE__->new;
 
 sub process_file {
+  my $self;
+  # Allow for $package->process_file(%hash), $obj->process_file, and process_file()
+  if (@_ % 2) {
+    my $invocant = shift;
+    if (ref($invocant)) {
+      $self = $invocant;
+    }
+    else {
+      $self = $invocant->new;
+    }
+  }
+  else {
+    $self = $Singleton;
+  }
 
-  # Allow for $package->process_file(%hash) in the future
-  my ($pkg, %options) = @_ % 2 ? @_ : (__PACKAGE__, @_);
-
+  my %options = @_;
   $self->{ProtoUsed} = exists $options{prototypes};
 
   # Set defaults.
@@ -147,22 +179,6 @@ sub process_file {
   $self->{BLOCK_re} = '\s*(' .
     join('|' => @ExtUtils::ParseXS::Constants::XSKeywords) .
     "|$END)\\s*:";
-
-  our ($C_group_rex, $C_arg);
-  if (not defined $C_group_rex) {
-    # Group in C (no support for comments or literals)
-    $C_group_rex = qr/ [({\[]
-                 (?: (?> [^()\[\]{}]+ ) | (??{ $C_group_rex }) )*
-                 [)}\]] /x;
-    # Chunk in C without comma at toplevel (no comments):
-    $C_arg = qr/ (?: (?> [^()\[\]{},"']+ )
-           |   (??{ $C_group_rex })
-           |   " (?: (?> [^\\"]+ )
-             |   \\.
-             )* "        # String literal
-                  |   ' (?: (?> [^\\']+ ) | \\. )* ' # Char literal
-           )* /xs;
-  }
 
   # Since at this point we're ready to begin printing to the output file and
   # reading from the input file, I want to get as much data as possible into
@@ -369,8 +385,10 @@ EOM
     my $only_C_inlist_ref = {};        # Not in the signature of Perl function
     if ($self->{argtypes} and $orig_args =~ /\S/) {
       my $args = "$orig_args ,";
+      use re 'eval';
       if ($args =~ /^( (??{ $C_arg }) , )* $ /x) {
         @args = ($args =~ /\G ( (??{ $C_arg }) ) , /xg);
+        no re 'eval';
         for ( @args ) {
           s/^\s+//;
           s/\s+$//;
@@ -411,6 +429,7 @@ EOM
         }
       }
       else {
+        no re 'eval';
         @args = split(/\s*,\s*/, $orig_args);
         Warn( $self, "Warning: cannot parse argument list '$orig_args', fallback to split");
       }
@@ -978,7 +997,14 @@ EOF
   return 1;
 }
 
-sub report_error_count { $self->{errors} }
+sub report_error_count {
+  if (@_) {
+    return $_[0]->{errors}||0;
+  }
+  else {
+    return $Singleton->{errors}||0;
+  }
+}
 
 # Input:  ($self, $_, @{ $self->{line} }) == unparsed input.
 # Output: ($_, @{ $self->{line} }) == (rest of line, following lines).
