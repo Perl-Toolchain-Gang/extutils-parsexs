@@ -565,7 +565,7 @@ EOF
         if (defined($static) or $self->{func_name} eq 'new') {
           print "\tchar *";
           $self->{var_types}->{"CLASS"} = "char *";
-          generate_init( {
+          $self->generate_init( {
             type          => "char *",
             num           => 1,
             var           => "CLASS",
@@ -575,7 +575,7 @@ EOF
         else {
           print "\t$class *";
           $self->{var_types}->{"THIS"} = "$class *";
-          generate_init( {
+          $self->generate_init( {
             type          => "$class *",
             num           => 1,
             var           => "THIS",
@@ -673,7 +673,7 @@ EOF
         $self->Warn("Warning: Found a 'CODE' section which seems to be using 'RETVAL' but no 'OUTPUT' section.");
       }
 
-      generate_output( {
+      $self->generate_output( {
         type        => $self->{var_types}->{$_},
         num         => $self->{args_match}->{$_},
         var         => $_,
@@ -719,7 +719,7 @@ EOF
         }
         else {
           # RETVAL almost never needs SvSETMAGIC()
-          generate_output( {
+          $self->generate_output( {
             type        => $self->{ret_type},
             num         => 0,
             var         => 'RETVAL',
@@ -735,7 +735,7 @@ EOF
       print "\tXSprePUSH;" if $c and not $prepush_done;
       print "\tEXTEND(SP,$c);\n" if $c;
       $xsreturn += $c;
-      generate_output( {
+      $self->generate_output( {
         type        => $self->{var_types}->{$_},
         num         => $num++,
         var         => $_,
@@ -1116,7 +1116,7 @@ sub INPUT_handler {
       }
     }
     elsif ($var_init =~ /\S/) {
-      output_init( {
+      $self->output_init( {
         type          => $var_type,
         num           => $self->{var_num},
         var           => $var_name,
@@ -1125,7 +1125,7 @@ sub INPUT_handler {
       } );
     }
     elsif ($self->{var_num}) {
-      generate_init( {
+      $self->generate_init( {
         type          => $var_type,
         num           => $self->{var_num},
         var           => $var_name,
@@ -1168,7 +1168,7 @@ sub OUTPUT_handler {
       print "\tSvSETMAGIC(ST(" , $self->{var_num} - 1 , "));\n" if $self->{DoSetMagic};
     }
     else {
-      generate_output( {
+      $self->generate_output( {
         type        => $self->{var_types}->{$outarg},
         num         => $self->{var_num},
         var         => $outarg,
@@ -1740,7 +1740,9 @@ sub fetch_para {
 }
 
 sub output_init {
+  my $self = shift;
   my $argsref = shift;
+
   my ($type, $num, $var, $init, $printed_name) = (
     $argsref->{type},
     $argsref->{num},
@@ -1763,7 +1765,7 @@ sub output_init {
   }
   else {
     if (  $init =~ s/^\+//  &&  $num  ) {
-      generate_init( {
+      $self->generate_init( {
         type          => $type,
         num           => $num,
         var           => $var,
@@ -1784,7 +1786,9 @@ sub output_init {
 }
 
 sub generate_init {
+  my $self = shift;
   my $argsref = shift;
+
   my ($type, $num, $var, $printed_name) = (
     $argsref->{type},
     $argsref->{num},
@@ -1893,6 +1897,7 @@ sub generate_init {
 }
 
 sub generate_output {
+  my $self = shift;
   my $argsref = shift;
   my ($type, $num, $var, $do_setmagic, $do_push) = (
     $argsref->{type},
