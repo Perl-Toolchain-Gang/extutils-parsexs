@@ -1,0 +1,81 @@
+package ExtUtils::ParseXS::Eval;
+use strict;
+use warnings;
+
+our $VERSION = '3.18';
+
+=head1 NAME
+
+ExtUtils::ParseXS::Eval - Clean package to evaluate code in
+
+=head1 SYNOPSIS
+
+  use ExtUtils::ParseXS::Eval;
+  my $rv = ExtUtils::ParseXS::Eval::eval_typemap_code($parsexs_obj, "some Perl code");
+
+=head1 SUBROUTINES
+
+=head2 eval_output_typemap_code
+
+Sets up various bits of previously global state
+(formerly ExtUtils::ParseXS package variables)
+for eval'ing output typemap code that may refer to these
+variables.
+
+Warns the contents of C<$@> if any.
+
+=cut
+
+sub eval_output_typemap_code {
+  my ($_pxs, $_code, $_other) = @_;
+  my $Package         = $ExtUtils::ParseXS::Package; # TODO move to $self/$_pxs and use here
+  my $ALIAS           = $ExtUtils::ParseXS::ALIAS; # TODO move to $self/$_pxs and use here
+  my $func_name       = $ExtUtils::ParseXS::func_name; # TODO move to $self/$_pxs and use here
+  my $Full_func_name  = $ExtUtils::ParseXS::Full_func_name; # TODO move to $self/$_pxs and use here
+  my $pname           = $ExtUtils::ParseXS::pname; # TODO move to $self/$_pxs and use here
+
+  my ($var, $type, $ntype, $subtype, $arg)
+    = @{$_other}{qw(var type ntype subtype arg)};
+
+  my $rv = eval $_code;
+  warn $@ if $@;
+  return $rv;
+}
+
+=head2 eval_input_typemap_code
+
+Sets up various bits of previously global state
+(formerly ExtUtils::ParseXS package variables)
+for eval'ing output typemap code that may refer to these
+variables.
+
+Warns the contents of C<$@> if any.
+
+=cut
+
+sub eval_input_typemap_code {
+  my ($_pxs, $_code, $_other) = @_;
+  my $Package         = $ExtUtils::ParseXS::Package; # TODO move to $self/$_pxs and use here
+  my $ALIAS           = $ExtUtils::ParseXS::ALIAS; # TODO move to $self/$_pxs and use here
+  my $func_name       = $ExtUtils::ParseXS::func_name; # TODO move to $self/$_pxs and use here
+  my $Full_func_name  = $ExtUtils::ParseXS::Full_func_name; # TODO move to $self/$_pxs and use here
+  my $pname           = $ExtUtils::ParseXS::pname; # TODO move to $self/$_pxs and use here
+
+  my ($var, $type, $num, $init, $printed_name, $arg, $ntype, $argoff, $subtype)
+    = @{$_other}{qw(var type num init printed_name arg ntype argoff subtype)};
+
+  my $rv = eval $_code;
+  warn $@ if $@;
+  return $rv;
+}
+
+=head1 TODO
+
+Eventually, with better documentation and possible some cleanup,
+this could be part of C<ExtUtils::Typemaps>.
+
+=cut
+
+1;
+
+# vim: ts=2 sw=2 et:

@@ -16,6 +16,7 @@ BEGIN {
 use ExtUtils::ParseXS::Constants $VERSION;
 use ExtUtils::ParseXS::CountLines $VERSION;
 use ExtUtils::ParseXS::Utilities $VERSION;
+use ExtUtils::ParseXS::Eval $VERSION;
 $VERSION = eval $VERSION if $VERSION =~ /_/;
 
 use ExtUtils::ParseXS::Utilities qw(
@@ -708,33 +709,31 @@ EOF
       elsif ($self->{gotRETVAL} || $wantRETVAL) {
         my $outputmap = $self->{typemap}->get_outputmap( ctype => $self->{ret_type} );
         my $t = $self->{optimize} && $outputmap && $outputmap->targetable;
-        # Although the '$var' declared in the next line is never explicitly
-        # used within this 'elsif' block, commenting it out leads to
-        # disaster, starting with the first 'eval qq' inside the 'elsif' block
-        # below.
-        # It appears that this is related to the fact that at this point the
-        # value of $t is a reference to an array whose [2] element includes
-        # '$var' as a substring:
-        # <i> <> <(IV)$var>
         my $var = 'RETVAL';
         my $type = $self->{ret_type};
 
         if ($t and not $t->{with_size} and $t->{type} eq 'p') {
           # PUSHp corresponds to setpvn.  Treat setpv directly
-          my $what = eval qq("$t->{what}");
-          warn $@ if $@;
+          my $what = $self->eval_output_typemap_code(
+            qq("$t->{what}"),
+            {var => $var, type => $self->{ret_type}}
+          );
 
           print "\tsv_setpv(TARG, $what); XSprePUSH; PUSHTARG;\n";
           $prepush_done = 1;
         }
         elsif ($t) {
-          my $what = eval qq("$t->{what}");
-          warn $@ if $@;
+          my $what = $self->eval_output_typemap_code(
+            qq("$t->{what}"),
+            {var => $var, type => $self->{ret_type}}
+          );
 
           my $tsize = $t->{what_size};
           $tsize = '' unless defined $tsize;
-          $tsize = eval qq("$tsize");
-          warn $@ if $@;
+          $tsize = $self->eval_output_typemap_code(
+            qq("$tsize"),
+            {var => $var, type => $self->{ret_type}}
+          );
           print "\tXSprePUSH; PUSH$t->{type}($what$tsize);\n";
           $prepush_done = 1;
         }
@@ -1769,16 +1768,18 @@ sub output_init {
     $argsref->{init},
     $argsref->{printed_name}
   );
-  my $arg = $num ? "ST(" . ($num - 1) . ")" : "/* not a parameter */";
+  # local assign for efficiently passing in to eval_input_typemap_code
+  local $argsref->{arg} = $num
+                          ? "ST(" . ($num-1) . ")"
+                          : "/* not a parameter */";
 
   if (  $init =~ /^=/  ) {
     if ($printed_name) {
-      eval qq/print " $init\\n"/;
+      $self->eval_input_typemap_code(qq/print " $init\\n"/, $argsref);
     }
     else {
-      eval qq/print "\\t$var $init\\n"/;
+      $self->eval_input_typemap_code(qq/print "\\t$var $init\\n"/, $argsref);
     }
-    warn $@ if $@;
   }
   else {
     if (  $init =~ s/^\+//  &&  $num  ) {
@@ -1794,12 +1795,11 @@ sub output_init {
       $init =~ s/^;//;
     }
     else {
-      eval qq/print "\\t$var;\\n"/;
-      warn $@ if $@;
+      $self->eval_input_typemap_code(qq/print "\\t$var;\\n"/, $argsref);
       $init =~ s/^;//;
     }
-    $self->{deferred} .= eval qq/"\\n\\t$init\\n"/;
-    warn $@ if $@;
+    $self->{deferred}
+      .= $self->eval_input_typemap_code(qq/"\\n\\t$init\\n"/, $argsref);
   }
 }
 
@@ -1811,9 +1811,9 @@ sub generate_init {
     $argsref->{var},
     $argsref->{printed_name},
   );
+
   my $arg = "ST(" . ($num - 1) . ")";
-  my ($argoff, $ntype);
-  $argoff = $num - 1;
+  my $argoff = $num - 1;
 
   my $typemaps = $self->{typemap};
 
@@ -1821,9 +1821,9 @@ sub generate_init {
   $self->report_typemap_failure($typemaps, $type), return
     unless $typemaps->get_typemap(ctype => $type);
 
-  ($ntype = $type) =~ s/\s*\*/Ptr/g;
-  my $subtype;
-  ($subtype = $ntype) =~ s/(?:Array)?(?:Ptr)?$//;
+  (my $ntype = $type) =~ s/\s*\*/Ptr/g;
+  (my $subtype = $ntype) =~ s/(?:Array)?(?:Ptr)?$//;
+
   my $typem = $typemaps->get_typemap(ctype => $type);
   my $xstype = $typem->xstype;
   $xstype =~ s/OBJ$/REF/ if $func_name =~ /DESTROY$/;
@@ -1861,6 +1861,18 @@ sub generate_init {
   if ($expr =~ m#/\*.*scope.*\*/#i) {  # "scope" in C comments
     $self->{ScopeThisXSUB} = 1;
   }
+
+  my $eval_vars = {
+    var           => $var,
+    printed_name  => $printed_name,
+    type          => $type,
+    ntype         => $ntype,
+    subtype       => $subtype,
+    num           => $num,
+    arg           => $arg,
+    argoff        => $argoff,
+  };
+
   if (defined($self->{defaults}->{$var})) {
     $expr =~ s/(\t+)/$1    /g;
     $expr =~ s/        /\t/g;
@@ -1868,33 +1880,35 @@ sub generate_init {
       print ";\n";
     }
     else {
-      eval qq/print "\\t$var;\\n"/;
-      warn $@ if $@;
+      $self->eval_input_typemap_code(qq/print "\\t$var;\\n"/, $eval_vars);
     }
     if ($self->{defaults}->{$var} eq 'NO_INIT') {
-      $self->{deferred} .= eval qq/"\\n\\tif (items >= $num) {\\n$expr;\\n\\t}\\n"/;
+      $self->{deferred} .= $self->eval_input_typemap_code(
+        qq/"\\n\\tif (items >= $num) {\\n$expr;\\n\\t}\\n"/,
+        $eval_vars
+      );
     }
     else {
-      $self->{deferred} .= eval qq/"\\n\\tif (items < $num)\\n\\t    $var = $self->{defaults}->{$var};\\n\\telse {\\n$expr;\\n\\t}\\n"/;
+      $self->{deferred} .= $self->eval_input_typemap_code(
+        qq/"\\n\\tif (items < $num)\\n\\t    $var = $self->{defaults}->{$var};\\n\\telse {\\n$expr;\\n\\t}\\n"/,
+        $eval_vars
+      );
     }
-    warn $@ if $@;
   }
   elsif ($self->{ScopeThisXSUB} or $expr !~ /^\s*\$var =/) {
     if ($printed_name) {
       print ";\n";
     }
     else {
-      eval qq/print "\\t$var;\\n"/;
-      warn $@ if $@;
+      $self->eval_input_typemap_code(qq/print "\\t$var;\\n"/, $eval_vars);
     }
-    $self->{deferred} .= eval qq/"\\n$expr;\\n"/;
-    warn $@ if $@;
+    $self->{deferred}
+      .= $self->eval_input_typemap_code(qq/"\\n$expr;\\n"/, $eval_vars);
   }
   else {
     die "panic: do not know how to handle this branch for function pointers"
       if $printed_name;
-    eval qq/print "$expr;\\n"/;
-    warn $@ if $@;
+    $self->eval_input_typemap_code(qq/print "$expr;\\n"/, $eval_vars);
   }
 }
 
@@ -1908,11 +1922,12 @@ sub generate_output {
     $argsref->{do_push}
   );
   my $arg = "ST(" . ($num - ($num != 0)) . ")";
-  my $ntype;
 
   my $typemaps = $self->{typemap};
 
   $type = tidy_type($type);
+  local $argsref->{type} = $type;
+
   if ($type =~ /^array\(([^,]*),(.*)\)/) {
     print "\t$arg = sv_newmortal();\n";
     print "\tsv_setpvn($arg, (char *)$var, $2 * sizeof($1));\n";
@@ -1925,11 +1940,11 @@ sub generate_output {
     my $outputmap = $typemaps->get_outputmap(xstype => $typemap->xstype);
     $self->blurt("Error: No OUTPUT definition for type '$type', typekind '" . $typemap->xstype . "' found"), return
       unless $outputmap;
-    ($ntype = $type) =~ s/\s*\*/Ptr/g;
+    (my $ntype = $type) =~ s/\s*\*/Ptr/g;
     $ntype =~ s/\(\)//g;
-    my $subtype;
-    ($subtype = $ntype) =~ s/(?:Array)?(?:Ptr)?$//;
+    (my $subtype = $ntype) =~ s/(?:Array)?(?:Ptr)?$//;
 
+    my $eval_vars = {%$argsref, subtype => $subtype, ntype => $ntype, arg => $arg};
     my $expr = $outputmap->cleaned_code;
     if ($expr =~ /DO_ARRAY_ELEM/) {
       my $subtypemap = $typemaps->get_typemap(ctype => $subtype);
@@ -1944,24 +1959,21 @@ sub generate_output {
       $subexpr =~ s/\$var/${var}\[ix_$var]/g;
       $subexpr =~ s/\n\t/\n\t\t/g;
       $expr =~ s/DO_ARRAY_ELEM\n/$subexpr/;
-      eval "print qq\a$expr\a";
-      warn $@ if $@;
+      $self->eval_output_typemap_code("print qq\a$expr\a", $eval_vars);
       print "\t\tSvSETMAGIC(ST(ix_$var));\n" if $do_setmagic;
     }
     elsif ($var eq 'RETVAL') {
       if ($expr =~ /^\t\$arg = new/) {
         # We expect that $arg has refcnt 1, so we need to
         # mortalize it.
-        eval "print qq\a$expr\a";
-        warn $@ if $@;
+        $self->eval_output_typemap_code("print qq\a$expr\a", $eval_vars);
         print "\tsv_2mortal(ST($num));\n";
         print "\tSvSETMAGIC(ST($num));\n" if $do_setmagic;
       }
       elsif ($expr =~ /^\s*\$arg\s*=/) {
         # We expect that $arg has refcnt >=1, so we need
         # to mortalize it!
-        eval "print qq\a$expr\a";
-        warn $@ if $@;
+        $self->eval_output_typemap_code("print qq\a$expr\a", $eval_vars);
         print "\tsv_2mortal(ST(0));\n";
         print "\tSvSETMAGIC(ST(0));\n" if $do_setmagic;
       }
@@ -1971,24 +1983,35 @@ sub generate_output {
         # coincidence, something like $arg = &sv_undef
         # works too.
         print "\tST(0) = sv_newmortal();\n";
-        eval "print qq\a$expr\a";
-        warn $@ if $@;
+        $self->eval_output_typemap_code("print qq\a$expr\a", $eval_vars);
         # new mortals don't have set magic
       }
     }
     elsif ($do_push) {
       print "\tPUSHs(sv_newmortal());\n";
-      $arg = "ST($num)";
-      eval "print qq\a$expr\a";
-      warn $@ if $@;
+      local $eval_vars->{arg} = "ST($num)";
+      $self->eval_output_typemap_code("print qq\a$expr\a", $eval_vars);
       print "\tSvSETMAGIC($arg);\n" if $do_setmagic;
     }
     elsif ($arg =~ /^ST\(\d+\)$/) {
-      eval "print qq\a$expr\a";
-      warn $@ if $@;
+      $self->eval_output_typemap_code("print qq\a$expr\a", $eval_vars);
       print "\tSvSETMAGIC($arg);\n" if $do_setmagic;
     }
   }
+}
+
+
+# Just delegates to a clean package.
+# Shim to evaluate Perl code in the right variable context
+# for typemap code (having things such as $ALIAS set up).
+sub eval_output_typemap_code {
+  my ($self, $code, $other) = @_;
+  return ExtUtils::ParseXS::Eval::eval_output_typemap_code($self, $code, $other);
+}
+
+sub eval_input_typemap_code {
+  my ($self, $code, $other) = @_;
+  return ExtUtils::ParseXS::Eval::eval_input_typemap_code($self, $code, $other);
 }
 
 1;
