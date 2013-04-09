@@ -46,13 +46,6 @@ our @EXPORT_OK = qw(
   report_error_count
 );
 
-# The scalars in the line below remain as 'our' variables because pulling
-# them into $self led to build problems.  In most cases, strings being
-# 'eval'-ed contain the variables' names hard-coded.
-our (
-  $Package, $func_name, $Full_func_name, $pname, $ALIAS,
-);
-
 our $self = bless {} => __PACKAGE__;
 
 sub process_file {
@@ -236,7 +229,7 @@ EOM
       die ("Error: Unterminated pod in $self->{filename}, line $podstartline\n")
         unless $self->{lastline};
     }
-    last if ($Package, $self->{Prefix}) =
+    last if ($self->{Package}, $self->{Prefix}) =
       /^MODULE\s*=\s*[\w:]+(?:\s+PACKAGE\s*=\s*([\w:]+))?(?:\s+PREFIX\s*=\s*(\S+))?\s*$/;
 
     print $_;
@@ -345,23 +338,23 @@ EOM
       unless $func_header =~ /^(?:([\w:]*)::)?(\w+)\s*\(\s*(.*?)\s*\)\s*(const)?\s*(;\s*)?$/s;
 
     my ($class, $orig_args);
-    ($class, $func_name, $orig_args) =  ($1, $2, $3);
+    ($class, $self->{func_name}, $orig_args) =  ($1, $2, $3);
     $class = "$4 $class" if $4;
-    ($pname = $func_name) =~ s/^($self->{Prefix})?/$self->{Packprefix}/;
+    ($self->{pname} = $self->{func_name}) =~ s/^($self->{Prefix})?/$self->{Packprefix}/;
     my $clean_func_name;
-    ($clean_func_name = $func_name) =~ s/^$self->{Prefix}//;
-    $Full_func_name = "$self->{Packid}_$clean_func_name";
+    ($clean_func_name = $self->{func_name}) =~ s/^$self->{Prefix}//;
+    $self->{Full_func_name} = "$self->{Packid}_$clean_func_name";
     if ($Is_VMS) {
-      $Full_func_name = $SymSet->addsym($Full_func_name);
+      $self->{Full_func_name} = $SymSet->addsym( $self->{Full_func_name} );
     }
 
     # Check for duplicate function definition
     for my $tmp (@{ $self->{XSStack} }) {
-      next unless defined $tmp->{functions}{$Full_func_name};
+      next unless defined $tmp->{functions}{ $self->{Full_func_name} };
       Warn( $self, "Warning: duplicate function definition '$clean_func_name' detected");
       last;
     }
-    $self->{XSStack}->[$XSS_work_idx]{functions}{$Full_func_name}++;
+    $self->{XSStack}->[$XSS_work_idx]{functions}{ $self->{Full_func_name} }++;
     %{ $self->{XsubAliases} }     = ();
     %{ $self->{XsubAliasValues} } = ();
     %{ $self->{Interfaces} }      = ();
@@ -437,7 +430,7 @@ EOM
       }
     }
     if (defined($class)) {
-      my $arg0 = ((defined($static) or $func_name eq 'new')
+      my $arg0 = ((defined($static) or $self->{func_name} eq 'new')
           ? "CLASS" : "THIS");
       unshift(@args, $arg0);
     }
@@ -483,20 +476,7 @@ EOM
     my $EXPLICIT_RETURN = ($CODE &&
             ("@{ $self->{line} }" =~ /(\bST\s*\([^;]*=) | (\bXST_m\w+\s*\()/x ));
 
-    # The $ALIAS which follows is only explicitly called within the scope of
-    # process_file().  In principle, it ought to be a lexical, i.e., 'my
-    # $ALIAS' like the other nearby variables.  However, implementing that
-    # change produced a slight difference in the resulting .c output in at
-    # least two distributions:  B/BD/BDFOY/Crypt-Rijndael and
-    # G/GF/GFUJI/Hash-FieldHash.  The difference is, arguably, an improvement
-    # in the resulting C code.  Example:
-    # 388c388
-    # <                       GvNAME(CvGV(cv)),
-    # ---
-    # >                       "Crypt::Rijndael::encrypt",
-    # But at this point we're committed to generating the *same* C code that
-    # the current version of ParseXS.pm does.  So we're declaring it as 'our'.
-    $ALIAS  = grep(/^\s*ALIAS\s*:/,  @{ $self->{line} });
+    $self->{ALIAS}  = grep(/^\s*ALIAS\s*:/,  @{ $self->{line} });
 
     my $INTERFACE  = grep(/^\s*INTERFACE\s*:/,  @{ $self->{line} });
 
@@ -507,12 +487,12 @@ EOM
     # print function header
     print Q(<<"EOF");
 #$externC
-#XS_EUPXS(XS_${Full_func_name}); /* prototype to pass -Wmissing-prototypes */
-#XS_EUPXS(XS_${Full_func_name})
+#XS_EUPXS(XS_$self->{Full_func_name}); /* prototype to pass -Wmissing-prototypes */
+#XS_EUPXS(XS_$self->{Full_func_name})
 #[[
 #    dVAR; dXSARGS;
 EOF
-    print Q(<<"EOF") if $ALIAS;
+    print Q(<<"EOF") if $self->{ALIAS};
 #    dXSI32;
 EOF
     print Q(<<"EOF") if $INTERFACE;
@@ -582,7 +562,7 @@ EOF
 EOF
 
       if (!$self->{thisdone} && defined($class)) {
-        if (defined($static) or $func_name eq 'new') {
+        if (defined($static) or $self->{func_name} eq 'new') {
           print "\tchar *";
           $self->{var_types}->{"CLASS"} = "char *";
           generate_init( {
@@ -610,7 +590,7 @@ EOF
       my ($wantRETVAL);
       # do code
       if (/^\s*NOT_IMPLEMENTED_YET/) {
-        print "\n\tPerl_croak(aTHX_ \"$pname: not implemented yet\");\n";
+        print "\n\tPerl_croak(aTHX_ \"$self->{pname}: not implemented yet\");\n";
         $_ = '';
       }
       else {
@@ -646,7 +626,7 @@ EOF
             $self->{have_CODE_with_RETVAL} = 1;
           }
         }
-        elsif (defined($class) and $func_name eq "DESTROY") {
+        elsif (defined($class) and $self->{func_name} eq "DESTROY") {
           print "\n\t";
           print "delete THIS;\n";
         }
@@ -657,25 +637,25 @@ EOF
             $wantRETVAL = 1;
           }
           if (defined($static)) {
-            if ($func_name eq 'new') {
-              $func_name = "$class";
+            if ($self->{func_name} eq 'new') {
+              $self->{func_name} = "$class";
             }
             else {
               print "${class}::";
             }
           }
           elsif (defined($class)) {
-            if ($func_name eq 'new') {
-              $func_name .= " $class";
+            if ($self->{func_name} eq 'new') {
+              $self->{func_name} .= " $class";
             }
             else {
               print "THIS->";
             }
           }
-          $func_name =~ s/^\Q$args{'s'}//
+          $self->{func_name} =~ s/^\Q$args{'s'}//
             if exists $args{'s'};
-          $func_name = 'XSFUNCTION' if $self->{interface};
-          print "$func_name($self->{func_args});\n";
+          $self->{func_name} = 'XSFUNCTION' if $self->{interface};
+          print "$self->{func_name}($self->{func_args});\n";
         }
       }
 
@@ -843,37 +823,37 @@ EOF
     }
 
     if (%{ $self->{XsubAliases} }) {
-      $self->{XsubAliases}->{$pname} = 0
-        unless defined $self->{XsubAliases}->{$pname};
+      $self->{XsubAliases}->{ $self->{pname} } = 0
+        unless defined $self->{XsubAliases}->{ $self->{pname} };
       while ( my ($xname, $value) = each %{ $self->{XsubAliases} }) {
         push(@{ $self->{InitFileCode} }, Q(<<"EOF"));
-#        cv = $self->{newXS}(\"$xname\", XS_$Full_func_name, file$self->{proto});
+#        cv = $self->{newXS}(\"$xname\", XS_$self->{Full_func_name}, file$self->{proto});
 #        XSANY.any_i32 = $value;
 EOF
       }
     }
     elsif (@{ $self->{Attributes} }) {
       push(@{ $self->{InitFileCode} }, Q(<<"EOF"));
-#        cv = $self->{newXS}(\"$pname\", XS_$Full_func_name, file$self->{proto});
-#        apply_attrs_string("$Package", cv, "@{ $self->{Attributes} }", 0);
+#        cv = $self->{newXS}(\"$self->{pname}\", XS_$self->{Full_func_name}, file$self->{proto});
+#        apply_attrs_string("$self->{Package}", cv, "@{ $self->{Attributes} }", 0);
 EOF
     }
     elsif ($self->{interface}) {
       while ( my ($yname, $value) = each %{ $self->{Interfaces} }) {
-        $yname = "$Package\::$yname" unless $yname =~ /::/;
+        $yname = "$self->{Package}\::$yname" unless $yname =~ /::/;
         push(@{ $self->{InitFileCode} }, Q(<<"EOF"));
-#        cv = $self->{newXS}(\"$yname\", XS_$Full_func_name, file$self->{proto});
+#        cv = $self->{newXS}(\"$yname\", XS_$self->{Full_func_name}, file$self->{proto});
 #        $self->{interface_macro_set}(cv,$value);
 EOF
       }
     }
     elsif($self->{newXS} eq 'newXS'){ # work around P5NCI's empty newXS macro
       push(@{ $self->{InitFileCode} },
-       "        $self->{newXS}(\"$pname\", XS_$Full_func_name, file$self->{proto});\n");
+       "        $self->{newXS}(\"$self->{pname}\", XS_$self->{Full_func_name}, file$self->{proto});\n");
     }
     else {
       push(@{ $self->{InitFileCode} },
-       "        (void)$self->{newXS}(\"$pname\", XS_$Full_func_name, file$self->{proto});\n");
+       "        (void)$self->{newXS}(\"$self->{pname}\", XS_$self->{Full_func_name}, file$self->{proto});\n");
     }
   } # END 'PARAGRAPH' 'while' loop
 
@@ -888,10 +868,10 @@ EOF
 #
 EOF
     unshift(@{ $self->{InitFileCode} }, <<"MAKE_FETCHMETHOD_WORK");
-    /* Making a sub named "${Package}::()" allows the package */
+    /* Making a sub named "$self->{Package}::()" allows the package */
     /* to be findable via fetchmethod(), and causes */
-    /* overload::Overloaded("${Package}") to return true. */
-    (void)$self->{newXS}("${Package}::()", XS_$self->{Packid}_nil, file$self->{proto});
+    /* overload::Overloaded("$self->{Package}") to return true. */
+    (void)$self->{newXS}("$self->{Package}::()", XS_$self->{Packid}_nil, file$self->{proto});
 MAKE_FETCHMETHOD_WORK
   }
 
@@ -916,9 +896,9 @@ EOF
   #Under 5.8.x and lower, newXS is declared in proto.h as expecting a non-const
   #file name argument. If the wrong qualifier is used, it causes breakage with
   #C++ compilers and warnings with recent gcc.
-  #-Wall: if there is no $Full_func_name there are no xsubs in this .xs
+  #-Wall: if there is no $self->{Full_func_name} there are no xsubs in this .xs
   #so 'file' is unused
-  print Q(<<"EOF") if $Full_func_name;
+  print Q(<<"EOF") if $self->{Full_func_name};
 ##if (PERL_REVISION == 5 && PERL_VERSION < 9)
 #    char* file = __FILE__;
 ##else
@@ -956,7 +936,7 @@ EOF
 #    /* mentioned above, and looks in the SV* slot of it for */
 #    /* the "fallback" status. */
 #    sv_setsv(
-#        get_sv( "${Package}::()", TRUE ),
+#        get_sv( "$self->{Package}::()", TRUE ),
 #        $self->{Fallback}
 #    );
 EOF
@@ -1329,9 +1309,9 @@ sub OVERLOAD_handler {
     trim_whitespace($_);
     while ( s/^\s*([\w:"\\)\+\-\*\/\%\<\>\.\&\|\^\!\~\{\}\=]+)\s*//) {
       $self->{Overload} = 1 unless $self->{Overload};
-      my $overload = "$Package\::(".$1;
+      my $overload = "$self->{Package}\::(".$1;
       push(@{ $self->{InitFileCode} },
-       "        (void)$self->{newXS}(\"$overload\", XS_$Full_func_name, file$self->{proto});\n");
+       "        (void)$self->{newXS}(\"$overload\", XS_$self->{Full_func_name}, file$self->{proto});\n");
     }
   }
 }
@@ -1685,12 +1665,12 @@ sub fetch_para {
   if ($self->{lastline} =~
       /^MODULE\s*=\s*([\w:]+)(?:\s+PACKAGE\s*=\s*([\w:]+))?(?:\s+PREFIX\s*=\s*(\S+))?\s*$/) {
     my $Module = $1;
-    $Package = defined($2) ? $2 : ''; # keep -w happy
+    $self->{Package} = defined($2) ? $2 : ''; # keep -w happy
     $self->{Prefix}  = defined($3) ? $3 : ''; # keep -w happy
     $self->{Prefix} = quotemeta $self->{Prefix};
     ($self->{Module_cname} = $Module) =~ s/\W/_/g;
-    ($self->{Packid} = $Package) =~ tr/:/_/;
-    $self->{Packprefix} = $Package;
+    ($self->{Packid} = $self->{Package}) =~ tr/:/_/;
+    $self->{Packprefix} = $self->{Package};
     $self->{Packprefix} .= "::" if $self->{Packprefix} ne "";
     $self->{lastline} = "";
   }
@@ -1826,7 +1806,7 @@ sub generate_init {
 
   my $typem = $typemaps->get_typemap(ctype => $type);
   my $xstype = $typem->xstype;
-  $xstype =~ s/OBJ$/REF/ if $func_name =~ /DESTROY$/;
+  $xstype =~ s/OBJ$/REF/ if $self->{func_name} =~ /DESTROY$/;
   if ($xstype eq 'T_PV' and exists $self->{lengthof}->{$var}) {
     print "\t$var" unless $printed_name;
     print " = ($type)SvPV($arg, STRLEN_length_of_$var);\n";

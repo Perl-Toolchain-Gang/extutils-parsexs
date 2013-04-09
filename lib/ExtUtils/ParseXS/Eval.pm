@@ -28,11 +28,9 @@ Warns the contents of C<$@> if any.
 
 sub eval_output_typemap_code {
   my ($_pxs, $_code, $_other) = @_;
-  my $Package         = $ExtUtils::ParseXS::Package; # TODO move to $self/$_pxs and use here
-  my $ALIAS           = $ExtUtils::ParseXS::ALIAS; # TODO move to $self/$_pxs and use here
-  my $func_name       = $ExtUtils::ParseXS::func_name; # TODO move to $self/$_pxs and use here
-  my $Full_func_name  = $ExtUtils::ParseXS::Full_func_name; # TODO move to $self/$_pxs and use here
-  my $pname           = $ExtUtils::ParseXS::pname; # TODO move to $self/$_pxs and use here
+
+  my ($Package, $ALIAS, $func_name, $Full_func_name, $pname)
+    = @{$_pxs}{qw(Package ALIAS func_name Full_func_name pname)};
 
   my ($var, $type, $ntype, $subtype, $arg)
     = @{$_other}{qw(var type ntype subtype arg)};
@@ -55,11 +53,9 @@ Warns the contents of C<$@> if any.
 
 sub eval_input_typemap_code {
   my ($_pxs, $_code, $_other) = @_;
-  my $Package         = $ExtUtils::ParseXS::Package; # TODO move to $self/$_pxs and use here
-  my $ALIAS           = $ExtUtils::ParseXS::ALIAS; # TODO move to $self/$_pxs and use here
-  my $func_name       = $ExtUtils::ParseXS::func_name; # TODO move to $self/$_pxs and use here
-  my $Full_func_name  = $ExtUtils::ParseXS::Full_func_name; # TODO move to $self/$_pxs and use here
-  my $pname           = $ExtUtils::ParseXS::pname; # TODO move to $self/$_pxs and use here
+
+  my ($Package, $ALIAS, $func_name, $Full_func_name, $pname)
+    = @{$_pxs}{qw(Package ALIAS func_name Full_func_name pname)};
 
   my ($var, $type, $num, $init, $printed_name, $arg, $ntype, $argoff, $subtype)
     = @{$_other}{qw(var type num init printed_name arg ntype argoff subtype)};
