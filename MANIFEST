@@ -38,6 +38,7 @@ t/510-t-bare.t
 t/511-t-whitespace.t
 t/512-t-file.t
 t/513-t-merge.t
+t/514-t-clone.t
 t/600-t-compat.t
 t/data/b.typemap
 t/data/combined.typemap
