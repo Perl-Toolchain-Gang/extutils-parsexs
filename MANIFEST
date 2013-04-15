@@ -4,6 +4,7 @@ lib/ExtUtils/ParseXS.pm
 lib/ExtUtils/ParseXS.pod
 lib/ExtUtils/ParseXS/Constants.pm
 lib/ExtUtils/ParseXS/CountLines.pm
+lib/ExtUtils/ParseXS/Eval.pm
 lib/ExtUtils/ParseXS/Utilities.pm
 lib/ExtUtils/Typemaps.pm
 lib/ExtUtils/Typemaps/Cmd.pm
