@@ -39,7 +39,9 @@ t/510-t-bare.t
 t/511-t-whitespace.t
 t/512-t-file.t
 t/513-t-merge.t
-t/514-t-clone.t
+t/514-t-embed.t
+t/515-t-cmd.t
+t/516-t-clone.t
 t/600-t-compat.t
 t/data/b.typemap
 t/data/combined.typemap
@@ -49,8 +51,10 @@ t/data/conflicting.typemap
 t/data/other.typemap
 t/data/perl.typemap
 t/data/simple.typemap
+t/lib/ExtUtils/Typemaps/Test.pm
 t/lib/IncludeTester.pm
 t/lib/PrimitiveCapture.pm
+t/lib/TypemapTest/Foo.pm
 t/pseudotypemap1
 t/typemap
 t/XSInclude.xsh
