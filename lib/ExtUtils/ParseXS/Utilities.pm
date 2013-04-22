@@ -315,7 +315,7 @@ sub make_targetable {
       |
       \( (??{ $bal }) \)
     )*
-  ]x;
+  ]xo;
 
   # matches variations on (SV*)
   my $sv_cast = qr[
@@ -326,7 +326,7 @@ sub make_targetable {
 
   my $size = qr[ # Third arg (to setpvn)
     , \s* (??{ $bal })
-  ]x;
+  ]xo;
 
   my %targetable;
   foreach my $key (keys %{ $output_expr_ref }) {
@@ -345,7 +345,7 @@ sub make_targetable {
             ( (??{ $bal }) )    # Set from
           ( (??{ $size }) )?    # Possible sizeof set-from
           \) \s* ; \s* $
-        ]x
+        ]xo
     );
     $targetable{$key} = [$type, $with_size, $arg, $sarg] if $type;
   }
