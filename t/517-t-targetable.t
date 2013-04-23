@@ -5,11 +5,9 @@ use Carp;
 use Cwd;
 use File::Spec;
 use File::Temp qw( tempdir );
-use Test::More qw(no_plan); # tests =>  7;
+use Test::More;
 use lib qw( lib );
-use ExtUtils::ParseXS::Utilities qw(
-    make_targetable
-);
+use ExtUtils::Typemaps;
 
 my $output_expr_ref = {
   'T_CALLBACK' => '	sv_setpvn($arg, $var.context.value().chp(),
@@ -134,13 +132,41 @@ my $output_expr_ref = {
 ',
 };
 
-my %targetable;
-%targetable = make_targetable($output_expr_ref);
+plan tests => scalar(keys %$output_expr_ref);
 
-ok(! exists $targetable{'T_AVREF'},
-    "Element found in 'output_expr' not found in \%targetable: not an 'sv_set'" );
+my %results = (
+  T_UV        => { type => 'u', with_size => undef, what => '(UV)$var', what_size => undef },
+  T_IV        => { type => 'i', with_size => undef, what => '(IV)$var', what_size => undef },
+  T_NV        => { type => 'n', with_size => undef, what => '(NV)$var', what_size => undef },
+  T_FLOAT     => { type => 'n', with_size => undef, what => '(double)$var', what_size => undef },
+  T_PTR       => { type => 'i', with_size => undef, what => 'PTR2IV($var)', what_size => undef },
+  T_PV        => { type => 'p', with_size => undef, what => '$var', what_size => undef },
+  T_OPAQUE    => { type => 'p', with_size => 'n', what => '(char *)&$var', what_size => ', sizeof($var)' },
+  T_OPAQUEPTR => { type => 'p', with_size => 'n', what => '(char *)$var', what_size => ', sizeof(*$var)' },
+  T_CHAR      => { type => 'p', with_size => 'n', what => '(char *)&$var', what_size => ', 1' },
+  T_CALLBACK  => { type => 'p', with_size => 'n', what => '$var.context.value().chp()',
+                   what_size => ",\n		\$var.context.value().size()" }, # whitespace is significant here
+  T_DATAUNIT  => { type => 'p', with_size => 'n', what => '$var.chp()', what_size => ', $var.size()' },
+);
 
-ok(exists $targetable{'T_CALLBACK'},
-    "Element found in 'output_expr' found in \%targetable as expected" );
+$results{$_} = $results{T_UV} for qw(T_U_LONG T_U_INT T_U_CHAR T_U_SHORT);
+$results{$_} = $results{T_IV} for qw(T_LONG T_INT T_SHORT T_ENUM);
+$results{$_} = $results{T_FLOAT} for qw(T_DOUBLE);
 
-pass("Passed all tests in $0");
+foreach my $xstype (sort keys %$output_expr_ref) {
+  my $om = ExtUtils::Typemaps::OutputMap->new(
+    xstype => $xstype,
+    code => $output_expr_ref->{$xstype}
+  );
+  my $targetable = $om->targetable;
+  if (not exists($results{$xstype})) {
+    ok(not(defined($targetable)), "$xstype not targetable")
+      or diag(join ", ", map {defined($_) ? $_ : "<undef>"} %$targetable);
+  }
+  else {
+    my $res = $results{$xstype};
+    is_deeply($targetable, $res, "$xstype targetable and has right output")
+      or diag(join ", ", map {defined($_) ? $_ : "<undef>"} %$targetable);
+  }
+}
+

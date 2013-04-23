@@ -99,8 +99,8 @@ This is an obscure optimization that used to live in C<ExtUtils::ParseXS>
 directly.
 
 In a nutshell, this will check whether the output code
-involves calling C<set_iv>, C<set_uv>, C<set_nv>, C<set_pv> or C<set_pvn>
-to set the special C<$arg> placeholder to a new value
+involves calling C<sv_setiv>, C<sv_setuv>, C<sv_setnv>, C<sv_setpv> or
+C<sv_setpvn> to set the special C<$arg> placeholder to a new value
 B<AT THE END OF THE OUTPUT CODE>. If that is the case, the code is
 eligible for using the C<TARG>-related macros to optimize this.
 Thus the name of the method: C<targetable>.
@@ -128,7 +128,14 @@ sub targetable {
       |
       \( (??{ $bal }) \)
     )*
-  ]xo;
+  ]x;
+  my $bal_no_comma = qr[
+    (?:
+      (?>[^(),]+)
+      |
+      \( (??{ $bal }) \)
+    )+
+  ]x;
 
   # matches variations on (SV*)
   my $sv_cast = qr[
@@ -155,9 +162,9 @@ sub targetable {
         \s*
         \( \s*
           $sv_cast \$arg \s* , \s*
-          ( (??{ $bal }) )    # Set from
-        ( (??{ $size }) )?    # Possible sizeof set-from
-        \) \s* ; \s* $
+          ( $bal_no_comma )    # Set from
+          ( $size )?           # Possible sizeof set-from
+        \s* \) \s* ; \s* $
       ]xo
   );
 
