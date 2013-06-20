@@ -25,7 +25,6 @@ t/103-tidy_type.t
 t/104-map_type.t
 t/105-valid_proto_string.t
 t/106-process_typemaps.t
-t/107-make_targetable.t
 t/108-map_type.t
 t/109-standard_XS_defs.t
 t/110-assign_func_args.t
@@ -42,6 +41,7 @@ t/513-t-merge.t
 t/514-t-embed.t
 t/515-t-cmd.t
 t/516-t-clone.t
+t/517-t-targetable.t
 t/600-t-compat.t
 t/data/b.typemap
 t/data/combined.typemap
