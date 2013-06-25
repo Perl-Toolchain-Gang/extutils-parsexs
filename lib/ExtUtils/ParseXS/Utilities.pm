@@ -6,7 +6,7 @@ use File::Spec;
 use lib qw( lib );
 use ExtUtils::ParseXS::Constants ();
 
-our $VERSION = '3.18_04';
+our $VERSION = '3.21';
 
 our (@ISA, @EXPORT_OK);
 @ISA = qw(Exporter);
@@ -243,7 +243,7 @@ Process all typemap files.
 =item * Arguments
 
   my $typemaps_object = process_typemaps( $args{typemap}, $pwd );
-      
+
 List of two elements:  C<typemap> element from C<%args>; current working
 directory.
 

@@ -2,7 +2,7 @@ package ExtUtils::ParseXS::Eval;
 use strict;
 use warnings;
 
-our $VERSION = '3.18';
+our $VERSION = '3.18_04';
 
 =head1 NAME
 
@@ -11,7 +11,9 @@ ExtUtils::ParseXS::Eval - Clean package to evaluate code in
 =head1 SYNOPSIS
 
   use ExtUtils::ParseXS::Eval;
-  my $rv = ExtUtils::ParseXS::Eval::eval_typemap_code($parsexs_obj, "some Perl code");
+  my $rv = ExtUtils::ParseXS::Eval::eval_typemap_code(
+    $parsexs_obj, "some Perl code"
+  );
 
 =head1 SUBROUTINES
 
