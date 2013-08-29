@@ -64,7 +64,7 @@ WriteMakefile(
     'Carp' => 0,
     'Cwd' => 0,
     'DynaLoader' => 0,
-    'Exporter' => 0,
+    'Exporter' => '5.57',
     'ExtUtils::CBuilder' => 0,
     'File::Basename' => 0,
     'File::Spec' => 0,
