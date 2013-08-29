@@ -18,7 +18,6 @@ README
 t/001-basic.t
 t/002-more.t
 t/003-usage.t
-t/004-nolinenumbers.t
 t/101-standard_typemap_locations.t
 t/102-trim_whitespace.t
 t/103-tidy_type.t
