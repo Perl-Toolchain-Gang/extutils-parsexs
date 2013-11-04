@@ -126,7 +126,7 @@ sub process_file {
   # clean this up sometime, probably.  For now, we just pull them out
   # of %args.  -Ken
 
-  $self->{hiertype} = $args{hiertype};
+  $self->{RetainCplusplusHierarchicalTypes} = $args{hiertype};
   $self->{WantPrototypes} = $args{prototypes};
   $self->{WantVersionChk} = $args{versioncheck};
   $self->{WantLineNumbers} = $args{linenumbers};
@@ -1824,7 +1824,7 @@ sub generate_init {
       if defined $self->{defaults}->{$var};
     return;
   }
-  $type =~ tr/:/_/ unless $self->{hiertype};
+  $type =~ tr/:/_/ unless $self->{RetainCplusplusHierarchicalTypes};
 
   my $inputmap = $typemaps->get_inputmap(xstype => $xstype);
   $self->blurt("Error: No INPUT definition for type '$type', typekind '" . $type->xstype . "' found"), return
