@@ -1873,11 +1873,13 @@ sub generate_init {
       $self->report_typemap_failure($typemaps, $subtype);
       return;
     }
+
     my $subinputmap = $typemaps->get_inputmap(xstype => $subtypemap->xstype);
     if (not $subinputmap) {
       $self->blurt("Error: No INPUT definition for type '$subtype', typekind '" . $subtypemap->xstype . "' found");
       return;
     }
+
     my $subexpr = $subinputmap->cleaned_code;
     $subexpr =~ s/\$type/\$subtype/g;
     $subexpr =~ s/ntype/subtype/g;
@@ -1944,13 +1946,9 @@ sub generate_init {
 sub generate_output {
   my $self = shift;
   my $argsref = shift;
-  my ($type, $num, $var, $do_setmagic, $do_push) = (
-    $argsref->{type},
-    $argsref->{num},
-    $argsref->{var},
-    $argsref->{do_setmagic},
-    $argsref->{do_push}
-  );
+  my ($type, $num, $var, $do_setmagic, $do_push)
+    = @{$argsref}{qw(type num var do_setmagic do_push)};
+
   my $arg = "ST(" . ($num - ($num != 0)) . ")";
 
   my $typemaps = $self->{typemap};
@@ -1965,11 +1963,17 @@ sub generate_output {
   }
   else {
     my $typemap = $typemaps->get_typemap(ctype => $type);
-    $self->report_typemap_failure($typemaps, $type), return
-      if not $typemap;
+    if (not $typemap) {
+      $self->report_typemap_failure($typemaps, $type);
+      return;
+    }
+
     my $outputmap = $typemaps->get_outputmap(xstype => $typemap->xstype);
-    $self->blurt("Error: No OUTPUT definition for type '$type', typekind '" . $typemap->xstype . "' found"), return
-      unless $outputmap;
+    if (not $outputmap) {
+      $self->blurt("Error: No OUTPUT definition for type '$type', typekind '" . $typemap->xstype . "' found");
+      return;
+    }
+
     (my $ntype = $type) =~ s/\s*\*/Ptr/g;
     $ntype =~ s/\(\)//g;
     (my $subtype = $ntype) =~ s/(?:Array)?(?:Ptr)?$//;
@@ -1978,11 +1982,17 @@ sub generate_output {
     my $expr = $outputmap->cleaned_code;
     if ($expr =~ /DO_ARRAY_ELEM/) {
       my $subtypemap = $typemaps->get_typemap(ctype => $subtype);
-      $self->report_typemap_failure($typemaps, $subtype), return
-        if not $subtypemap;
+      if (not $subtypemap) {
+        $self->report_typemap_failure($typemaps, $subtype);
+        return;
+      }
+
       my $suboutputmap = $typemaps->get_outputmap(xstype => $subtypemap->xstype);
-      $self->blurt("Error: No OUTPUT definition for type '$subtype', typekind '" . $subtypemap->xstype . "' found"), return
-        unless $suboutputmap;
+      if (not $suboutputmap) {
+        $self->blurt("Error: No OUTPUT definition for type '$subtype', typekind '" . $subtypemap->xstype . "' found");
+        return;
+      }
+
       my $subexpr = $suboutputmap->cleaned_code;
       $subexpr =~ s/ntype/subtype/g;
       $subexpr =~ s/\$arg/ST(ix_$var)/g;
