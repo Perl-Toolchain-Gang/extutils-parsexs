@@ -1788,19 +1788,15 @@ sub output_init {
   my $self = shift;
   my $argsref = shift;
 
-  my ($type, $num, $var, $init, $printed_name) = (
-    $argsref->{type},
-    $argsref->{num},
-    $argsref->{var},
-    $argsref->{init},
-    $argsref->{printed_name}
-  );
+  my ($type, $num, $var, $init, $printed_name)
+    = @{$argsref}{qw(type num var init printed_name)};
+
   # local assign for efficiently passing in to eval_input_typemap_code
   local $argsref->{arg} = $num
                           ? "ST(" . ($num-1) . ")"
                           : "/* not a parameter */";
 
-  if (  $init =~ /^=/  ) {
+  if ( $init =~ /^=/ ) {
     if ($printed_name) {
       $self->eval_input_typemap_code(qq/print " $init\\n"/, $argsref);
     }
@@ -1834,21 +1830,19 @@ sub generate_init {
   my $self = shift;
   my $argsref = shift;
 
-  my ($type, $num, $var, $printed_name) = (
-    $argsref->{type},
-    $argsref->{num},
-    $argsref->{var},
-    $argsref->{printed_name},
-  );
+  my ($type, $num, $var, $printed_name)
+    = @{$argsref}{qw(type num var printed_name)};
 
-  my $arg = "ST(" . ($num - 1) . ")";
   my $argoff = $num - 1;
+  my $arg = "ST($argoff)";
 
   my $typemaps = $self->{typemap};
 
   $type = ExtUtils::Typemaps::tidy_type($type);
-  $self->report_typemap_failure($typemaps, $type), return
-    unless $typemaps->get_typemap(ctype => $type);
+  if (not $typemaps->get_typemap(ctype => $type)) {
+    $self->report_typemap_failure($typemaps, $type);
+    return;
+  }
 
   (my $ntype = $type) =~ s/\s*\*/Ptr/g;
   (my $subtype = $ntype) =~ s/(?:Array)?(?:Ptr)?$//;
@@ -1866,18 +1860,24 @@ sub generate_init {
   $type =~ tr/:/_/ unless $self->{RetainCplusplusHierarchicalTypes};
 
   my $inputmap = $typemaps->get_inputmap(xstype => $xstype);
-  $self->blurt("Error: No INPUT definition for type '$type', typekind '" . $type->xstype . "' found"), return
-    unless defined $inputmap;
+  if (not defined $inputmap) {
+    $self->blurt("Error: No INPUT definition for type '$type', typekind '" . $type->xstype . "' found");
+    return;
+  }
 
   my $expr = $inputmap->cleaned_code;
   # Note: This gruesome bit either needs heavy rethinking or documentation. I vote for the former. --Steffen
   if ($expr =~ /DO_ARRAY_ELEM/) {
     my $subtypemap  = $typemaps->get_typemap(ctype => $subtype);
-    $self->report_typemap_failure($typemaps, $subtype), return
-      if not $subtypemap;
+    if (not $subtypemap) {
+      $self->report_typemap_failure($typemaps, $subtype);
+      return;
+    }
     my $subinputmap = $typemaps->get_inputmap(xstype => $subtypemap->xstype);
-    $self->blurt("Error: No INPUT definition for type '$subtype', typekind '" . $subtypemap->xstype . "' found"), return
-      unless $subinputmap;
+    if (not $subinputmap) {
+      $self->blurt("Error: No INPUT definition for type '$subtype', typekind '" . $subtypemap->xstype . "' found");
+      return;
+    }
     my $subexpr = $subinputmap->cleaned_code;
     $subexpr =~ s/\$type/\$subtype/g;
     $subexpr =~ s/ntype/subtype/g;
