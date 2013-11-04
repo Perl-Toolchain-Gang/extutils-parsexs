@@ -1657,6 +1657,69 @@ sub Q {
   $text;
 }
 
+# Process "MODULE = Foo ..." lines and update global state accordingly
+sub _process_module_xs_line {
+  my ($self, $module, $pkg, $prefix) = @_;
+
+  ($self->{Module_cname} = $module) =~ s/\W/_/g;
+
+  $self->{Package} = defined($pkg) ? $pkg : '';
+  $self->{Prefix}  = quotemeta( defined($prefix) ? $prefix : '' );
+
+  ($self->{Packid} = $self->{Package}) =~ tr/:/_/;
+
+  $self->{Packprefix} = $self->{Package};
+  $self->{Packprefix} .= "::" if $self->{Packprefix} ne "";
+
+  $self->{lastline} = "";
+}
+
+# Skip any embedded POD sections
+sub _maybe_skip_pod {
+  my ($self) = @_;
+
+  while ($self->{lastline} =~ /^=/) {
+    while ($self->{lastline} = readline($self->{FH})) {
+      last if ($self->{lastline} =~ /^=cut\s*$/);
+    }
+    $self->death("Error: Unterminated pod") unless defined $self->{lastline};
+    $self->{lastline} = readline($self->{FH});
+    chomp $self->{lastline};
+    $self->{lastline} =~ s/^\s+$//;
+  }
+}
+
+# This chunk of code strips out (and parses) embedded TYPEMAP blocks
+# which support a HEREdoc-alike block syntax.
+sub _maybe_parse_typemap_block {
+  my ($self) = @_;
+
+  # This is special cased from the usual paragraph-handler logic
+  # due to the HEREdoc-ish syntax.
+  if ($self->{lastline} =~ /^TYPEMAP\s*:\s*<<\s*(?:(["'])(.+?)\1|([^\s'"]+))\s*;?\s*$/)
+  {
+    my $end_marker = quotemeta(defined($1) ? $2 : $3);
+
+    # Scan until we find $end_marker alone on a line.
+    my @tmaplines;
+    while (1) {
+      $self->{lastline} = readline($self->{FH});
+      $self->death("Error: Unterminated TYPEMAP section") if not defined $self->{lastline};
+      last if $self->{lastline} =~ /^$end_marker\s*$/;
+      push @tmaplines, $self->{lastline};
+    }
+
+    my $tmap = ExtUtils::Typemaps->new(
+      string        => join("", @tmaplines),
+      lineno_offset => 1 + ($self->current_line_number() || 0),
+      fake_filename => $self->{filename},
+    );
+    $self->{typemap}->merge(typemap => $tmap, replace => 1);
+
+    $self->{lastline} = "";
+  }
+}
+
 # Read next xsub into @{ $self->{line} } from ($lastline, readline($self->{FH})).
 sub fetch_para {
   my $self = shift;
@@ -1666,66 +1729,38 @@ sub fetch_para {
     if !defined $self->{lastline} && $self->{XSStack}->[-1]{type} eq 'if';
   @{ $self->{line} } = ();
   @{ $self->{line_no} } = ();
-  return $self->PopFile() if !defined $self->{lastline};
+  return $self->PopFile() if not defined $self->{lastline}; # EOF
 
   if ($self->{lastline} =~
-      /^MODULE\s*=\s*([\w:]+)(?:\s+PACKAGE\s*=\s*([\w:]+))?(?:\s+PREFIX\s*=\s*(\S+))?\s*$/) {
-    my $Module = $1;
-    $self->{Package} = defined($2) ? $2 : ''; # keep -w happy
-    $self->{Prefix}  = defined($3) ? $3 : ''; # keep -w happy
-    $self->{Prefix} = quotemeta $self->{Prefix};
-    ($self->{Module_cname} = $Module) =~ s/\W/_/g;
-    ($self->{Packid} = $self->{Package}) =~ tr/:/_/;
-    $self->{Packprefix} = $self->{Package};
-    $self->{Packprefix} .= "::" if $self->{Packprefix} ne "";
-    $self->{lastline} = "";
+      /^MODULE\s*=\s*([\w:]+)(?:\s+PACKAGE\s*=\s*([\w:]+))?(?:\s+PREFIX\s*=\s*(\S+))?\s*$/)
+  {
+    $self->_process_module_xs_line($1, $2, $3);
   }
 
   for (;;) {
-    # Skip embedded PODs
-    while ($self->{lastline} =~ /^=/) {
-      while ($self->{lastline} = readline($self->{FH})) {
-        last if ($self->{lastline} =~ /^=cut\s*$/);
-      }
-      $self->death("Error: Unterminated pod") unless $self->{lastline};
-      $self->{lastline} = readline($self->{FH});
-      chomp $self->{lastline};
-      $self->{lastline} =~ s/^\s+$//;
-    }
+    $self->_maybe_skip_pod;
 
-    # This chunk of code strips out (and parses) embedded TYPEMAP blocks
-    # which support a HEREdoc-alike block syntax.
-    # This is special cased from the usual paragraph-handler logic
-    # due to the HEREdoc-ish syntax.
-    if ($self->{lastline} =~ /^TYPEMAP\s*:\s*<<\s*(?:(["'])(.+?)\1|([^\s'"]+))\s*;?\s*$/) {
-      my $end_marker = quotemeta(defined($1) ? $2 : $3);
-      my @tmaplines;
-      while (1) {
-        $self->{lastline} = readline($self->{FH});
-        $self->death("Error: Unterminated typemap") if not defined $self->{lastline};
-        last if $self->{lastline} =~ /^$end_marker\s*$/;
-        push @tmaplines, $self->{lastline};
-      }
+    $self->_maybe_parse_typemap_block;
 
-      my $tmapcode = join "", @tmaplines;
-      my $tmap = ExtUtils::Typemaps->new(
-        string => $tmapcode,
-        lineno_offset => ($self->current_line_number()||0)+1,
-        fake_filename => $self->{filename},
-      );
-      $self->{typemap}->merge(typemap => $tmap, replace => 1);
-
-      $self->{lastline} = "";
-    }
-
-    if ($self->{lastline} !~ /^\s*#/ ||
-    # CPP directives:
-    #    ANSI:    if ifdef ifndef elif else endif define undef
-    #        line error pragma
-    #    gcc:    warning include_next
-    #   obj-c:    import
-    #   others:    ident (gcc notes that some cpps have this one)
-    $self->{lastline} =~ /^#[ \t]*(?:(?:if|ifn?def|elif|else|endif|define|undef|pragma|error|warning|line\s+\d+|ident)\b|(?:include(?:_next)?|import)\s*["<].*[>"])/) {
+    if ($self->{lastline} !~ /^\s*#/ # not a CPP directive
+        # CPP directives:
+        #    ANSI:    if ifdef ifndef elif else endif define undef
+        #        line error pragma
+        #    gcc:    warning include_next
+        #   obj-c:    import
+        #   others:    ident (gcc notes that some cpps have this one)
+        || $self->{lastline} =~ /^\#[ \t]*
+                                  (?:
+                                        (?:if|ifn?def|elif|else|endif|
+                                           define|undef|pragma|error|
+                                           warning|line\s+\d+|ident)
+                                        \b
+                                      | (?:include(?:_next)?|import)
+                                        \s* ["<] .* [>"]
+                                 )
+                                /x
+    )
+    {
       last if $self->{lastline} =~ /^\S/ && @{ $self->{line} } && $self->{line}->[-1] eq "";
       push(@{ $self->{line} }, $self->{lastline});
       push(@{ $self->{line_no} }, $self->{lastline_no});
@@ -1741,8 +1776,12 @@ sub fetch_para {
     chomp $self->{lastline};
     $self->{lastline} =~ s/^\s+$//;
   }
-  pop(@{ $self->{line} }), pop(@{ $self->{line_no} }) while @{ $self->{line} } && $self->{line}->[-1] eq "";
-  1;
+
+  # Nuke trailing "line" entries until there's one that's not empty
+  pop(@{ $self->{line} }), pop(@{ $self->{line_no} })
+    while @{ $self->{line} } && $self->{line}->[-1] eq "";
+
+  return 1;
 }
 
 sub output_init {
