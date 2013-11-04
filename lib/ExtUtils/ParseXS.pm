@@ -79,12 +79,7 @@ sub process_file {
   # Allow for $package->process_file(%hash), $obj->process_file, and process_file()
   if (@_ % 2) {
     my $invocant = shift;
-    if (ref($invocant)) {
-      $self = $invocant;
-    }
-    else {
-      $self = $invocant->new;
-    }
+    $self = ref($invocant) ? $invocant : $invocant->new;
   }
   else {
     $self = $Singleton;
