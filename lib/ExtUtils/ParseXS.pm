@@ -118,8 +118,8 @@ sub process_file {
   }
   @{ $self->{XSStack} } = ({type => 'none'});
   $self->{InitFileCode} = [ @ExtUtils::ParseXS::Constants::InitFileCode ];
-  $self->{Overload}     = 0;
-  $self->{errors}       = 0;
+  $self->{Overload}     = 0; # bool
+  $self->{errors}       = 0; # count
   $self->{Fallback}     = '&PL_sv_undef';
 
   # Most of the 1500 lines below uses these globals.  We'll have to
@@ -292,14 +292,14 @@ EOM
       $self->{$member} = {};
     }
     $self->{proto_arg} = [];
-    $self->{processing_arg_with_types} = undef;
-    $self->{proto_in_this_xsub}        = undef;
-    $self->{scope_in_this_xsub}        = undef;
-    $self->{interface}                 = undef;
+    $self->{processing_arg_with_types} = 0; # bool
+    $self->{proto_in_this_xsub}        = 0; # counter & bool
+    $self->{scope_in_this_xsub}        = 0; # counter & bool
+    $self->{interface}                 = 0; # bool
     $self->{interface_macro}           = 'XSINTERFACE_FUNC';
     $self->{interface_macro_set}       = 'XSINTERFACE_FUNC_SET';
-    $self->{ProtoThisXSUB}             = $self->{WantPrototypes};
-    $self->{ScopeThisXSUB}             = 0;
+    $self->{ProtoThisXSUB}             = $self->{WantPrototypes}; # states 0 (none), 1 (yes), 2 (empty prototype)
+    $self->{ScopeThisXSUB}             = 0; # bool
 
     my $xsreturn = 0;
 
