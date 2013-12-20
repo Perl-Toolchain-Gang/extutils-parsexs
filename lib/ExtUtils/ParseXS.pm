@@ -200,7 +200,7 @@ EOM
   # is a basename'd $args{filename} due to chdir above)
   open($self->{FH}, '<', $self->{filename}) or die "cannot open $self->{filename}: $!\n";
 
-  firstmodule:
+  FIRSTMODULE:
   while (readline($self->{FH})) {
     if (/^=/) {
       my $podstartline = $.;
@@ -222,7 +222,7 @@ EOM
           print("#if 0\n  \"Skipped embedded POD.\"\n#endif\n");
           printf("#line %d \"%s\"\n", $. + 1, escape_file_for_line_directive($self->{filepathname}))
             if $self->{WantLineNumbers};
-          next firstmodule
+          next FIRSTMODULE;
         }
 
       } while (readline($self->{FH}));
