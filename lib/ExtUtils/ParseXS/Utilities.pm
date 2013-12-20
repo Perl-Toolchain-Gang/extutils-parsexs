@@ -315,7 +315,7 @@ sub map_type {
   my ($self, $type, $varname) = @_;
 
   # C++ has :: in types too so skip this
-  $type =~ tr/:/_/ unless $self->{hiertype};
+  $type =~ tr/:/_/ unless $self->{RetainCplusplusHierarchicalTypes};
   $type =~ s/^array\(([^,]*),(.*)\).*/$1 */s;
   if ($varname) {
     if ($type =~ / \( \s* \* (?= \s* \) ) /xg) {
