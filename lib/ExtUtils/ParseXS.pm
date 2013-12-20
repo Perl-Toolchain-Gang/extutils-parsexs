@@ -358,8 +358,8 @@ EOM
       last;
     }
     $self->{XSStack}->[$XSS_work_idx]{functions}{ $self->{Full_func_name} }++;
-    %{ $self->{XsubAliases} }     = ();
-    %{ $self->{XsubAliasValues} } = ();
+    delete $self->{XsubAliases};
+    delete $self->{XsubAliasValues};
     %{ $self->{Interfaces} }      = ();
     @{ $self->{Attributes} }      = ();
     $self->{DoSetMagic} = 1;
@@ -825,7 +825,7 @@ EOF
       $self->{proto} = qq{, "$self->{proto}"};
     }
 
-    if (%{ $self->{XsubAliases} }) {
+    if ($self->{XsubAliases} and keys %{ $self->{XsubAliases} }) {
       $self->{XsubAliases}->{ $self->{pname} } = 0
         unless defined $self->{XsubAliases}->{ $self->{pname} };
       foreach my $xname (sort keys %{ $self->{XsubAliases} }) {
@@ -926,7 +926,7 @@ EOF
 #
 EOF
 
-  print Q(<<"EOF") if defined $self->{xsubaliases} or defined $self->{interfaces};
+  print Q(<<"EOF") if defined $self->{XsubAliases} or defined $self->{interfaces};
 #    {
 #        CV * cv;
 #
@@ -948,7 +948,7 @@ EOF
 
   print @{ $self->{InitFileCode} };
 
-  print Q(<<"EOF") if defined $self->{xsubaliases} or defined $self->{interfaces};
+  print Q(<<"EOF") if defined $self->{XsubAliases} or defined $self->{interfaces};
 #    }
 EOF
 
@@ -1281,7 +1281,6 @@ sub get_aliases {
     Warn( $self, "Warning: Aliases '$orig_alias' and '$self->{XsubAliasValues}->{$value}' have identical values")
       if $self->{XsubAliasValues}->{$value};
 
-    $self->{xsubaliases} = 1;
     $self->{XsubAliases}->{$alias} = $value;
     $self->{XsubAliasValues}->{$value} = $orig_alias;
   }
