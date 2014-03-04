@@ -11,7 +11,7 @@ use Symbol;
 
 our $VERSION;
 BEGIN {
-  $VERSION = '3.22';
+  $VERSION = '3.23';
 }
 use ExtUtils::ParseXS::Constants $VERSION;
 use ExtUtils::ParseXS::CountLines $VERSION;
@@ -1695,7 +1695,7 @@ sub _maybe_parse_typemap_block {
 
   # This is special cased from the usual paragraph-handler logic
   # due to the HEREdoc-ish syntax.
-  if ($self->{lastline} =~ /^TYPEMAP\s*:\s*<<\s*(?:(["'])(.+?)\1|([^\s'"]+))\s*;?\s*$/)
+  if ($self->{lastline} =~ /^TYPEMAP\s*:\s*<<\s*(?:(["'])(.+?)\1|([^\s'"]+?))\s*;?\s*$/)
   {
     my $end_marker = quotemeta(defined($1) ? $2 : $3);
 
