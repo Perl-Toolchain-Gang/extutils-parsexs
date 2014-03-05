@@ -159,7 +159,7 @@ Steffen Mueller, <smueller@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright 2002-2013 by Ken Williams, David Golden and other contributors.  All
+Copyright 2002-2014 by Ken Williams, David Golden and other contributors.  All
 rights reserved.
 
 This library is free software; you can redistribute it and/or
