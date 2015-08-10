@@ -13,7 +13,6 @@ SYNOPSIS
                           typemap => 'path/to/typemap',
                           hiertype => 1,
                           except => 1,
-                          prototypes => 1,
                           versioncheck => 1,
                           linenumbers => 1,
                           optimize => 1,
@@ -119,7 +118,7 @@ AUTHOR
     *   Steffen Mueller, <smueller@cpan.org>
 
 COPYRIGHT
-    Copyright 2002-2013 by Ken Williams, David Golden and other
+    Copyright 2002-2014 by Ken Williams, David Golden and other
     contributors. All rights reserved.
 
     This library is free software; you can redistribute it and/or modify it
