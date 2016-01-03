@@ -579,7 +579,7 @@ EOF
           } );
         }
         else {
-          print "\t$class *";
+          print "\t" . map_type($self, "$class *");
           $self->{var_types}->{"THIS"} = "$class *";
           $self->generate_init( {
             type          => "$class *",
