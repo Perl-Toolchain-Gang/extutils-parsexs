@@ -371,10 +371,9 @@ EOM
     my (@fake_INPUT);
     my $only_C_inlist_ref = {};        # Not in the signature of Perl function
     if ($self->{argtypes} and $orig_args =~ /\S/) {
-      my $args = "$orig_args ,";
       use re 'eval';
-      if ($args =~ /^( (??{ $C_arg }) , )* $ /x) {
-        @args = ($args =~ /\G ( (??{ $C_arg }) ) , /xg);
+      @args = C_CPP_split_arguments($orig_args);
+      if (@args) {
         no re 'eval';
         for ( @args ) {
           s/^\s+//;
@@ -2142,6 +2141,39 @@ sub eval_output_typemap_code {
 sub eval_input_typemap_code {
   my ($self, $code, $other) = @_;
   return ExtUtils::ParseXS::Eval::eval_input_typemap_code($self, $code, $other);
+}
+
+# Split arguments from C/C++ function signatures
+sub C_CPP_split_arguments {
+  my $function_arguments = shift;
+  if ($function_arguments =~ m/\<.*,.*\>/) {
+    # More than one template argument
+    my @temp_args = split(/\s*,\s*/, $function_arguments);
+    my @args;
+    my $argument;
+    for (my $i = 0; $i < scalar @temp_args; $i++) { 
+        $argument = $temp_args[$i];
+        if ($temp_args[$i] =~ m/\</) {
+            my $number_of_opening_templates = $temp_args[$i] =~ tr/<//;
+            my $number_of_closing_templates = $temp_args[$i] =~ tr/>//;
+            while ($number_of_opening_templates > $number_of_closing_templates && $i < scalar @temp_args) {
+              $argument .= ", " . $temp_args[++$i];
+              $number_of_opening_templates += $temp_args[$i] =~ tr/<//;
+              $number_of_closing_templates += $temp_args[$i] =~ tr/>//;
+            } 
+        }
+        push @args, $argument;
+    }
+    return @args;
+  } else {
+      $function_arguments .= " ,";
+      if ($function_arguments =~ /^( (??{ $C_arg }) , )* $ /x) {
+          my @args = ($function_arguments =~ /\G ( (??{ $C_arg }) ) , /xg);
+          return @args;
+      } else {
+          return ();
+      }
+  }
 }
 
 1;

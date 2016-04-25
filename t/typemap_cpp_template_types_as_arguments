@@ -1,0 +1,35 @@
+TYPEMAP
+std::map<std::string, std::string>	T_STD_MAP_STD_STRING_STD_STRING
+std::map< std::string, std::vector< std::string > >	T_STD_MAP_STD_STRING_STD_VECTOR_STD_STRING
+std::pair< std::map< std::string, std::string >, std::vector<double> >	T_STD_PAIR_STD_MAP_STD_STRING_STD_STRING_STD_VECTOR_DOUBLE
+std::vector<double>	T_STD_VECTOR_DOUBLE
+
+INPUT
+
+T_STD_MAP_STD_STRING_STD_STRING
+	$var = $arg
+
+T_STD_MAP_STD_STRING_STD_VECTOR_STD_STRING
+	$var = $arg
+
+T_STD_PAIR_STD_MAP_STD_STRING_STD_STRING_STD_VECTOR_DOUBLE
+	$var = $arg
+
+T_STD_VECTOR_DOUBLE
+	$var = $arg
+
+OUTPUT
+
+T_STD_MAP_STD_STRING_STD_STRING
+	$arg = ${var}
+
+T_STD_MAP_STD_STRING_STD_VECTOR_STD_STRING
+	$arg = ${var}
+
+T_STD_PAIR_STD_MAP_STD_STRING_STD_STRING_STD_VECTOR_DOUBLE
+	$arg = ${var}
+
+T_STD_VECTOR_DOUBLE
+	$arg = ${var}
+
+
