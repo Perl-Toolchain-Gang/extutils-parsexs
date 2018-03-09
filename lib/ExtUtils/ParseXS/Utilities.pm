@@ -272,7 +272,7 @@ sub process_typemaps {
     die "Can't find $typemap in $pwd\n" unless -r $typemap;
   }
 
-  push @tm, standard_typemap_locations( \@INC );
+  unshift @tm, standard_typemap_locations( \@INC );
 
   require ExtUtils::Typemaps;
   my $typemap = ExtUtils::Typemaps->new;
