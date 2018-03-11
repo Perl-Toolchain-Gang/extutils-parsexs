@@ -74,9 +74,8 @@ my $startdir  = cwd();
        unless ref($t) eq 'ExtUtils::Typemaps';
     
     my $xs_int_type  = $t->get_typemap(ctype => 'int')->xstype;
-    my $xs_uint_type = $t->get_typemap(ctype => 'unsigned int')->xstype;
     
-    like($xs_int_type, qr/T_FOO_INT/, # From 'typemap-foo' file.
+    cmp_ok($xs_int_type, 'eq', 'T_FOO_INT', # From 'typemap-foo' file.
        'Last typemap file passed to process_typemaps() takes precedence'
     );
     
@@ -111,9 +110,8 @@ my $startdir  = cwd();
        unless ref($t) eq 'ExtUtils::Typemaps';
     
     my $xs_int_type  = $t->get_typemap(ctype => 'int')->xstype;
-    my $xs_uint_type = $t->get_typemap(ctype => 'unsigned int')->xstype;
     
-    like($xs_int_type, qr/T_FOO_INT/, # From 'typemap-foo' file.
+    cmp_ok($xs_int_type, 'eq', 'T_FOO_INT', # From 'typemap-foo' file.
        'Last typemap file passed to process_typemaps() takes precedence'
     );
     
