@@ -1,4 +1,5 @@
 Changes
+INSTALL
 lib/ExtUtils/ParseXS.pm
 lib/ExtUtils/ParseXS.pod
 lib/ExtUtils/ParseXS/Constants.pm
@@ -11,8 +12,14 @@ lib/ExtUtils/Typemaps/InputMap.pm
 lib/ExtUtils/Typemaps/OutputMap.pm
 lib/ExtUtils/Typemaps/Type.pm
 lib/ExtUtils/xsubpp
+lib/perlxs.pod
+lib/perlxstut.pod
+lib/perlxstypemap.pod
 Makefile.PL
 MANIFEST			This list of files
+META.json			Module JSON meta-data (added by MakeMaker)
+META.yml			Module YAML meta-data (added by MakeMaker)
+README
 t/001-basic.t
 t/002-more.t
 t/003-usage.t
@@ -62,5 +69,3 @@ t/XSTest.xs
 t/XSUsage.pm
 t/XSUsage.xs
 t/XSWarn.xs
-META.yml                                 Module YAML meta-data (added by MakeMaker)
-META.json                                Module JSON meta-data (added by MakeMaker)
