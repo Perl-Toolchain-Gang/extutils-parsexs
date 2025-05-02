@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 use strict;
-use Test::More tests => 472;
+use Test::More;
 use Config;
 use DynaLoader;
 use ExtUtils::CBuilder;
@@ -91,14 +91,20 @@ sub test_many {
 
         tie *FH, 'Capture';
         my $pxs = ExtUtils::ParseXS->new;
+        my $err;
         my $stderr = PrimitiveCapture::capture_stderr(sub {
             eval {
                 $pxs->process_file( filename => \$text, output => \*FH);
-            }
+            };
+            $err = $@;
         });
 
         my $out = tied(*FH)->content;
         untie *FH;
+
+        if (length $err) {
+            die "$desc_prefix: eval error, aborting:\n$err\n";
+        }
 
         # trim the output to just the function in question to make
         # test diagnostics smaller.
@@ -1444,6 +1450,13 @@ EOF
         |
         |PROTOTYPES: DISABLE
         |
+        |TYPEMAP: <<EOF
+        |mybool        T_MYBOOL
+        |
+        |OUTPUT
+        |T_MYBOOL
+        |    ${"$var" eq "RETVAL" ? \"$arg = boolSV($var);" : \"sv_setsv($arg, boolSV($var));"}
+        |EOF
 EOF
 
     my @test_fns = (
@@ -1468,10 +1481,278 @@ EOF
             [ 0, 0, qr/sv_setiv.*ST\(2\).*\bC\b/,      "set C"    ],
             [ 0, 0, qr/\QSvSETMAGIC(ST(2))/,           "set magic C" ],
 
-            [ 0, 0, qr/\QEXTEND(SP,2)/,                "extend"   ],
+            [ 0, 1, qr/\bEXTEND\b/,                    "NO extend"       ],
 
-            [ 0, 0, qr/sv_setiv.*ST\(0\).*\bD\b/,      "set D"    ],
-            [ 0, 0, qr/sv_setiv.*ST\(1\).*\bE\b/,      "set E"    ],
+            [ 0, 0, qr/\b\QTARGi((IV)D, 1);\E\s+\QST(0) = TARG;\E\s+\}\s+\Q++SP;/, "set D"    ],
+            [ 0, 0, qr/\b\Qsv_setiv(RETVALSV, (IV)E);\E\s+\QST(1) = RETVALSV;\E\s+\}\s+\Q++SP;/, "set E"    ],
+        ],
+
+        # Various types of OUTLIST where the param is the only value to
+        # be returned. Includes some types which might be optimised.
+
+        [
+            "OUTLIST void/bool",
+            [
+                'void',
+                'foo(OUTLIST bool A)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 1, qr/\bEXTEND\b/,                      "NO extend"       ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ , "create new mortal" ],
+            [ 0, 0, qr/\b\Qsv_setsv(RETVALSV, boolSV(A));/, "set RETVALSV"   ],
+            [ 0, 0, qr/\b\QST(0) = RETVALSV;\E\s+\}\s+\Q++SP;/, "store RETVALSV"],
+            [ 0, 0, qr/\b\QXSRETURN(1);/,                "XSRETURN(1)"     ],
+        ],
+        [
+            "OUTLIST void/mybool",
+            [
+                'void',
+                'foo(OUTLIST mybool A)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 1, qr/\bEXTEND\b/,                      "NO extend"       ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ , "create new mortal" ],
+            [ 0, 0, qr/\b\Qsv_setsv(RETVALSV, boolSV(A));/, "set RETVALSV"   ],
+            [ 0, 0, qr/\b\QST(0) = RETVALSV;\E\s+\}\s+\Q++SP;/, "store RETVALSV"],
+            [ 0, 0, qr/\b\QXSRETURN(1);/,                "XSRETURN(1)"     ],
+        ],
+        [
+            "OUTLIST void/int",
+            [
+                'void',
+                'foo(OUTLIST int A)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 1, qr/\bEXTEND\b/,                      "NO extend"       ],
+            [ 0, 1, qr/\bsv_newmortal\b;/,               "NO new mortal"   ],
+            [ 0, 0, qr/\bdXSTARG;/,                      "dXSTARG"         ],
+            [ 0, 0, qr/\b\QTARGi((IV)A, 1);/,            "set TARG"        ],
+            [ 0, 0, qr/\b\QST(0) = TARG;\E\s+\}\s+\Q++SP;/, "store TARG"   ],
+            [ 0, 0, qr/\b\QXSRETURN(1);/,                "XSRETURN(1)"     ],
+        ],
+        [
+            "OUTLIST void/char*",
+            [
+                'void',
+                'foo(OUTLIST char* A)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 1, qr/\bEXTEND\b/,                      "NO extend"       ],
+            [ 0, 1, qr/\bsv_newmortal\b;/,               "NO new mortal"   ],
+            [ 0, 0, qr/\bdXSTARG;/,                      "dXSTARG"         ],
+            [ 0, 0, qr/\b\Qsv_setpv((SV*)TARG, A);/,     "set TARG"        ],
+            [ 0, 0, qr/\b\QST(0) = TARG;\E\s+\}\s+\Q++SP;/, "store TARG"   ],
+            [ 0, 0, qr/\b\QXSRETURN(1);/,                "XSRETURN(1)"     ],
+        ],
+
+        # Various types of OUTLIST where the param is the second value to
+        # be returned. Includes some types which might be optimised.
+
+        [
+            "OUTLIST int/bool",
+            [
+                'int',
+                'foo(OUTLIST bool A)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 0, qr/\b\QEXTEND(SP,2);/,               "extend 2"        ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1);/,       "TARGi RETVAL"    ],
+            [ 0, 0, qr/\b\QST(0) = TARG;\E\s+\Q++SP;/,   "store RETVAL,SP++" ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ , "create new mortal" ],
+            [ 0, 0, qr/\b\Qsv_setsv(RETVALSV, boolSV(A));/, "set RETVALSV"   ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;\E\s+\}\s+\Q++SP;/, "store RETVALSV"],
+            [ 0, 0, qr/\b\QXSRETURN(2);/,                "XSRETURN(2)"     ],
+        ],
+        [
+            "OUTLIST int/mybool",
+            [
+                'int',
+                'foo(OUTLIST mybool A)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 0, qr/\b\QEXTEND(SP,2);/,               "extend 2"        ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1);/,       "TARGi RETVAL"    ],
+            [ 0, 0, qr/\b\QST(0) = TARG;\E\s+\Q++SP;/,   "store RETVAL,SP++" ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ , "create new mortal" ],
+            [ 0, 0, qr/\b\Qsv_setsv(RETVALSV, boolSV(A));/, "set RETVALSV"   ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;\E\s+\}\s+\Q++SP;/, "store RETVALSV"],
+            [ 0, 0, qr/\b\QXSRETURN(2);/,                "XSRETURN(2)"     ],
+        ],
+        [
+            "OUTLIST int/int",
+            [
+                'int',
+                'foo(OUTLIST int A)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 0, qr/\b\QEXTEND(SP,2);/,               "extend 2"        ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1);/,       "TARGi RETVAL"    ],
+            [ 0, 0, qr/\b\QST(0) = TARG;\E\s+\Q++SP;/,   "store RETVAL,SP++" ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ , "create new mortal" ],
+            [ 0, 0, qr/\b\Qsv_setiv(RETVALSV, (IV)A);/,  "set RETVALSV"   ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;\E\s+\}\s+\Q++SP;/, "store RETVALSV"],
+            [ 0, 0, qr/\b\QXSRETURN(2);/,                "XSRETURN(2)"     ],
+        ],
+        [
+            "OUTLIST int/char*",
+            [
+                'int',
+                'foo(OUTLIST char* A)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 0, qr/\b\QEXTEND(SP,2);/,               "extend 2"        ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1);/,       "TARGi RETVAL"    ],
+            [ 0, 0, qr/\b\QST(0) = TARG;\E\s+\Q++SP;/,   "store RETVAL,SP++" ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ , "create new mortal" ],
+            [ 0, 0, qr/\b\Qsv_setpv((SV*)RETVALSV, A);/, "set RETVALSV"   ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;\E\s+\}\s+\Q++SP;/, "store RETVALSV"],
+            [ 0, 0, qr/\b\QXSRETURN(2);/,                "XSRETURN(2)"     ],
+        ],
+        [
+            "OUTLIST int/opt int",
+            [
+                'int',
+                'foo(IN_OUTLIST int A = 0)',
+            ],
+            [ 0, 0, qr/\bXSprePUSH;/,                    "XSprePUSH"       ],
+            [ 0, 0, qr/\b\QEXTEND(SP,2);/,               "extend 2"        ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1);/,       "TARGi RETVAL"    ],
+            [ 0, 0, qr/\b\QST(0) = TARG;\E\s+\Q++SP;/,   "store RETVAL,SP++" ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ , "create new mortal" ],
+            [ 0, 0, qr/\b\Qsv_setiv(RETVALSV, (IV)A);/,  "set RETVALSV"   ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;\E\s+\}\s+\Q++SP;/, "store RETVALSV"],
+            [ 0, 0, qr/\b\QXSRETURN(2);/,                "XSRETURN(2)"     ],
+        ],
+        [
+            "OUTLIST with OUTPUT override",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(IN_OUTLIST int A)
+                |    OUTPUT:
+                |        A    setA(ST[99], A);
+EOF
+            [ 0, 1, qr/\bEXTEND\b/,                      "NO extend"       ],
+            [ 0, 0, qr/\b\QsetA(ST[99], A);/,            "set ST[99]"      ],
+            [ 0, 0, qr/\b\QTARGi((IV)A, 1);/,            "set ST[0]"       ],
+            [ 0, 0, qr/\b\QXSRETURN(1);/,                "XSRETURN(1)"     ],
+        ],
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
+}
+
+{
+    # Test OUTLIST on 'assign' format typemaps.
+    #
+    # Test code for returning the value of OUTLIST vars for typemaps of
+    # the form
+    #
+    #   $arg = $val;
+    # or
+    #   $arg = newFoo($arg);
+    #
+    # Includes whether RETVALSV ha been optimised away.
+    #
+    # Some of the typemaps don't expand to the 'assign' form yet for
+    # OUTLIST vars; we test those too.
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES: DISABLE
+        |
+        |TYPEMAP: <<EOF
+        |
+        |svref_fix   T_SVREF_REFCOUNT_FIXED
+        |mysvref_fix T_MYSVREF_REFCOUNT_FIXED
+        |mybool      T_MYBOOL
+        |
+        |OUTPUT
+        |T_SV
+        |    $arg = $var;
+        |
+        |T_MYSVREF_REFCOUNT_FIXED
+        |    $arg = newRV_noinc((SV*)$var);
+        |
+        |T_MYBOOL
+        |    $arg = boolSV($var);
+        |
+        |EOF
+EOF
+
+    my @test_fns = (
+        [
+            # This uses 'SV*' (handled specially by EU::PXS) but with the
+            # output code overridden to use the direct $arg = $var assign,
+            # which is normally only used for RETVAL return
+            "OUTLIST T_SV",
+            [
+                'int',
+                'foo(OUTLIST SV * A)',
+            ],
+            [ 0, 1, qr/\bRETVALSV\b/,                        "NO RETVALSV"    ],
+            [ 0, 0, qr/\b\QA = sv_2mortal(A);/,              "mortalise A"    ],
+            [ 0, 0, qr/\b\QST(1) = A;/,                      "store A"        ],
+        ],
+
+        [
+            "OUTLIST T_SVREF",
+            [
+                'int',
+                'foo(OUTLIST SVREF A)',
+            ],
+            [ 0, 0, qr/SV\s*\*\s*RETVALSV;/,                 "RETVALSV"       ],
+            [ 0, 0, qr/\b\QRETVALSV = newRV((SV*)A)/,        "newREF(A)"      ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_2mortal(RETVALSV);/,"mortalise RSV"  ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;/,               "store RETVALSV" ],
+        ],
+
+        [
+            # this one doesn't use assign for OUTLIST
+            "OUTLIST T_SVREF_REFCOUNT_FIXED",
+            [
+                'int',
+                'foo(OUTLIST svref_fix A)',
+            ],
+            [ 0, 0, qr/SV\s*\*\s*RETVALSV;/,                 "RETVALSV"       ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ ,     "new mortal"     ],
+            [ 0, 0, qr/\b\Qsv_setrv_noinc(RETVALSV, (SV*)A);/,"setrv()"       ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;/,               "store RETVALSV" ],
+        ],
+        [
+            # while this one uses assign
+            "OUTLIST T_MYSVREF_REFCOUNT_FIXED",
+            [
+                'int',
+                'foo(OUTLIST mysvref_fix A)',
+            ],
+            [ 0, 0, qr/SV\s*\*\s*RETVALSV;/,                 "RETVALSV"       ],
+            [ 0, 0, qr/\b\QRETVALSV = newRV_noinc((SV*)A)/,  "newRV(A)"       ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_2mortal(RETVALSV);/,"mortalise RSV"  ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;/,               "store RETVALSV" ],
+        ],
+
+        [
+            # this one doesn't use assign for OUTLIST
+            "OUTLIST T_BOOL",
+            [
+                'int',
+                'foo(OUTLIST bool A)',
+            ],
+            [ 0, 0, qr/SV\s*\*\s*RETVALSV;/,                 "RETVALSV"       ],
+            [ 0, 0, qr/\b\QRETVALSV = sv_newmortal();/ ,     "new mortal"     ],
+            [ 0, 0, qr/\b\Qsv_setsv(RETVALSV, boolSV(A));/,  "setsv(boolSV())"],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;/,               "store RETVALSV" ],
+        ],
+        [
+            # while this one uses assign
+            "OUTLIST T_MYBOOL",
+            [
+                'int',
+                'foo(OUTLIST mybool A)',
+            ],
+            [ 0, 1, qr/\bRETVALSV\b/,                        "NO RETVALSV"    ],
+            [ 0, 0, qr/\b\QST(1) = boolSV(A)/,               "store boolSV(A)"],
         ],
     );
 
@@ -1668,6 +1949,9 @@ EOF
         |TYPEMAP: <<EOF
         |const int     T_IV
         |const long    T_MYIV
+        |const short   T_MYSHORT
+        |undef_t       T_MYUNDEF
+        |ivmg_t        T_MYIVMG
         |
         |INPUT
         |T_MYIV
@@ -1676,6 +1960,15 @@ EOF
         |OUTPUT
         |T_OBJECT
         |    sv_setiv($arg, (IV)$var);
+        |
+        |T_MYSHORT
+        |    ${ "$var" eq "RETVAL" ? \"$arg = $var;" : \"sv_setiv($arg, $var);" }
+        |
+        |T_MYUNDEF
+        |    sv_set_undef($arg);
+        |
+        |T_MYIVMG
+        |    sv_setiv_mg($arg, (IV)RETVAL);
         |EOF
 EOF
 
@@ -1687,7 +1980,7 @@ EOF
                 'foo()',
             ],
             [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
-            [ 0, 0, qr/\bPUSHi\b/,    "has PUSHi" ],
+            [ 0, 0, qr/\bTARGi\b/,    "has TARGi" ],
             [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
         ],
 
@@ -1699,7 +1992,7 @@ EOF
                 'foo()',
             ],
             [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
-            [ 0, 0, qr/\bPUSHi\b/,    "has PUSHi" ],
+            [ 0, 0, qr/\bTARGi\b/,    "has TARGi" ],
             [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
         ],
 
@@ -1711,7 +2004,7 @@ EOF
                 'foo()',
             ],
             [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
-            [ 0, 0, qr/\bPUSHi\b/,    "has PUSHi" ],
+            [ 0, 0, qr/\bTARGi\b/,    "has TARGi" ],
             [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
         ],
 
@@ -1722,7 +2015,7 @@ EOF
                 'foo()',
             ],
             [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
-            [ 0, 0, qr/\bPUSHu\b/,    "has PUSHu" ],
+            [ 0, 0, qr/\bTARGu\b/,    "has TARGu" ],
             [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
         ],
 
@@ -1733,7 +2026,7 @@ EOF
                 'foo()',
             ],
             [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
-            [ 0, 0, qr/\bPUSHn\b/,    "has PUSHn" ],
+            [ 0, 0, qr/\bTARGn\b/,    "has TARGn" ],
             [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
         ],
 
@@ -1744,7 +2037,7 @@ EOF
                 'foo()',
             ],
             [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
-            [ 0, 0, qr/\bPUSHp\b/,    "has PUSHp" ],
+            [ 0, 0, qr/\bsv_setpvn\b/,"has sv_setpvn()" ],
             [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
         ],
 
@@ -1756,7 +2049,7 @@ EOF
             ],
             [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
             [ 0, 0, qr/\bsv_setpv\b/, "has sv_setpv" ],
-            [ 0, 0, qr/\bPUSHTARG\b/, "has PUSHTARG" ],
+            [ 0, 0, qr/\QST(0) = TARG;/, "has ST(0) = TARG" ],
             [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
         ],
 
@@ -1771,9 +2064,9 @@ EOF
             [ 0, 1, qr/\bXSprePUSH\b.+\bXSprePUSH\b/s,
                                          "has only one XSprePUSH" ],
 
-            [ 0, 0, qr/\bPUSHi\b/,       "has PUSHi" ],
-            [ 0, 0, qr/\bPUSHs\b.+\bPUSHs\b/s,
-                                         "has two PUSHs" ],
+            [ 0, 0, qr/\bTARGi\b/,       "has TARGi" ],
+            [ 0, 0, qr/\bsv_setiv\(RETVALSV.*sv_setiv\(RETVALSV/s,
+                                         "has two setiv(RETVALSV,...)" ],
 
             [ 0, 0, qr/\bXSRETURN\(3\)/, "has XSRETURN(3)" ],
         ],
@@ -1803,6 +2096,37 @@ EOF
             [ 0, 0, qr/\bsv_setiv\b/,   "has sv_setiv" ],
         ],
 
+        [
+            "dXSTARG with variant typemap",
+            [
+                'void',
+                'foo(OUTLIST const short a)',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,      "has targ def" ],
+            [ 0, 0, qr/\bTARGi\b/,       "has TARGi" ],
+            [ 0, 1, qr/\bsv_setiv\(/,    "has NO sv_setiv" ],
+            [ 0, 0, qr/\bXSRETURN\(1\)/, "has XSRETURN(1)" ],
+        ],
+
+        [
+            "dXSTARG with sv_set_undef",
+            [
+                'void',
+                'foo(OUTLIST undef_t a)',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,          "has targ def" ],
+            [ 0, 0, qr/\bsv_set_undef\(/,    "has sv_set_undef" ],
+        ],
+
+        [
+            "dXSTARG with sv_setiv_mg",
+            [
+                'ivmg_t',
+                'foo()',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,          "has targ def" ],
+            [ 0, 0, qr/\bTARGi\(/,           "has TARGi" ],
+        ],
     );
 
     test_many($preamble, 'XS_Foo_', \@test_fns);
@@ -1830,7 +2154,7 @@ EOF
                 |      RETVAL
 EOF
             [ 0, 1, qr/\bSvSETMAGIC\b/,   "no set magic" ],
-            [ 0, 0, qr/\bPUSHi\b/,        "has PUSHi" ],
+            [ 0, 0, qr/\bTARGi\b/,        "has TARGi" ],
             [ 0, 0, qr/\QXSRETURN(1)/,    "has XSRETURN" ],
         ],
 
@@ -1846,7 +2170,7 @@ EOF
                 |      RETVAL
 EOF
             [ 0, 1, qr/\bSvSETMAGIC\b/,   "no set magic" ],
-            [ 0, 0, qr/\bPUSHi\b/,        "has PUSHi" ],
+            [ 0, 0, qr/\bTARGi\b/,        "has TARGi" ],
             [ 0, 0, qr/\QXSRETURN(1)/,    "has XSRETURN" ],
         ],
 
@@ -1860,6 +2184,57 @@ EOF
                 |    OUTPUT:
                 |      RETVAL PUSHs(my_newsviv(RETVAL));
 EOF
+            [ 0, 0, qr/\QPUSHs(my_newsviv(RETVAL));/,   "uses code" ],
+            [ 0, 0, qr/\QXSRETURN(1)/,                  "has XSRETURN" ],
+        ],
+
+        [
+            "OUTPUT RETVAL with code and template-like syntax",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int a)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      RETVAL baz($arg,$val);
+EOF
+            # Check that the override code is *not* template-expanded.
+            # This was probably originally an implementation error, but
+            # keep that behaviour for now for backwards compatibility.
+            [ 0, 0, qr'baz\(\$arg,\$val\);',            "vars not expanded" ],
+        ],
+
+        [
+            "OUTPUT RETVAL with code on IN_OUTLIST param",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(IN_OUTLIST int abc)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      RETVAL
+                |      abc  my_set(ST[0], RETVAL);
+EOF
+            [ 0, 0, qr/\Qmy_set(ST[0], RETVAL)/,      "code used for st(0)" ],
+            [ 0, 0, qr/\bXSprePUSH;/,                 "XSprePUSH" ],
+            [ 0, 1, qr/\bEXTEND\b/,                   "NO extend"       ],
+            [ 0, 0, qr/\QTARGi((IV)RETVAL, 1);/,      "push RETVAL" ],
+            [ 0, 0, qr/\QRETVALSV = sv_newmortal();/, "create mortal" ],
+            [ 0, 0, qr/\Qsv_setiv(RETVALSV, (IV)abc);/, "code not used for st(1)" ],
+            [ 0, 0, qr/\QXSRETURN(2)/,                "has XSRETURN" ],
+        ],
+
+        [
+            "OUTPUT RETVAL with code and unknown type",
+            [ Q(<<'EOF') ],
+                |blah
+                |foo(int a)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      RETVAL PUSHs(my_newsviv(RETVAL));
+EOF
+            [ 0, 0, qr/blah\s+RETVAL;/,                 "decl" ],
             [ 0, 0, qr/\QPUSHs(my_newsviv(RETVAL));/,   "uses code" ],
             [ 0, 0, qr/\QXSRETURN(1)/,                  "has XSRETURN" ],
         ],
@@ -1890,7 +2265,7 @@ EOF
             [ 0, 0, qr/\b\Qsv_setiv(ST(2),\E.*ccc/,  "setiv(ccc)" ],
             [ 0, 1, qr/\b\Qsv_setiv(ST(3)/,          "no setiv(ddd)" ],
             [ 0, 0, qr/\b\Qmy_set(xyz)/,             "myset" ],
-            [ 0, 0, qr/\bPUSHi\b.*RETVAL/,           "has PUSHi(RETVAL)" ],
+            [ 0, 0, qr/\bTARGi\b.*RETVAL/,           "has TARGi(RETVAL,1)" ],
             [ 0, 0, qr/\QXSRETURN(1)/,               "has XSRETURN" ],
         ],
 
@@ -2030,18 +2405,18 @@ EOF
             [ 0, 0, qr/\b\QSvSETMAGIC(ST(0))/,       "set magic ST(0)" ],
             # prepare stack for OUTLIST
             [ 0, 0, qr/\bXSprePUSH\b/,               "XSprePUSH" ],
-            [ 0, 0, qr/\b\QEXTEND(SP,2)/,            "EXTEND(SP,2)" ],
+            [ 0, 1, qr/\bEXTEND\b/,                  "NO extend"       ],
             # OUTPUT: RETVAL: push return value on stack
-            [ 0, 0, qr/\bsv_setpv\(TARG,\s*RETVAL\)/,"sv_setpv(TARG, RETVAL)" ],
-            [ 0, 0, qr/\bPUSHTARG\b/,                "PUSHTARG" ],
+            [ 0, 0, qr/\bsv_setpv\(\(SV\*\)TARG,\s*RETVAL\)/,"sv_setpv(TARG, RETVAL)" ],
+            [ 0, 0, qr/\QST(0) = TARG;/,             "has ST(0) = TARG" ],
             # OUTLIST: push abc on stack
-            [ 0, 0, qr/\b\QPUSHs(sv_newmortal())/,   "PUSHs(sv_newmortal())" ],
-            [ 0, 0, qr/\b\Qsv_setiv(ST(1),\E.*abc\)/,"sv_setiv(ST1, abc)" ],
-            # and return TETVAL and abc
+            [ 0, 0, qr/\QRETVALSV = sv_newmortal();/, "create mortal" ],
+            [ 0, 0, qr/\b\Qsv_setiv(RETVALSV, (IV)abc);/,"sv_setiv(RETVALSV, abc)" ],
+            [ 0, 0, qr/\b\QST(1) = RETVALSV;\E\s+\}\s+\Q++SP;/, "store RETVALSV"],
+            # and return RETVAL and abc
             [ 0, 0, qr/\QXSRETURN(2)/,               "has XSRETURN" ],
 
-            # should only be one PUSHs and one SvSETMAGI
-            [ 0, 1, qr/\bPUSHs\b.*\bPUSHs\b/s,          "only one PUSHs" ],
+            # should only be one SvSETMAGIC
             [ 0, 1, qr/\bSvSETMAGIC\b.*\bSvSETMAGIC\b/s,"only one SvSETMAGIC" ],
         ],
     );
@@ -2227,7 +2602,7 @@ EOF
             [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,     "int  decl and init" ],
             [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
             [ 0, 0, qr/\bRETVAL\s*=\s*foo\(RETVAL, abc\)/,"autocall" ],
-            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,           "PUSHi" ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1)/,        "TARGi" ],
             [ 0, 0, qr/\b\QXSRETURN(1)/,                 "ret 1" ],
         ],
 
@@ -2243,7 +2618,7 @@ EOF
             [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,     "int  decl and init" ],
             [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
             [ 0, 0, qr/\bRETVAL\s*=\s*foo\(RETVAL, abc\)/,"autocall" ],
-            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,            "PUSHi" ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1)/,         "TARGi" ],
             [ 0, 0, qr/\b\QXSRETURN(1)/,                  "ret 1" ],
         ],
 
@@ -2259,7 +2634,7 @@ EOF
             [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(1)/,     "int  decl and init" ],
             [ 0, 0, qr/short\s+abc\s*=.*\QST(0)/,        "abc is ST0" ],
             [ 0, 0, qr/\bRETVAL\s*=\s*foo\(abc, RETVAL\)/,"autocall" ],
-            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,            "PUSHi" ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1)/,         "TARGi" ],
             [ 0, 0, qr/\b\QXSRETURN(1)/,                  "ret 1" ],
         ],
 
@@ -2280,7 +2655,7 @@ EOF
 
             [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,  "int  decl and init" ],
             [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,     "abc is ST1" ],
-            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,        "PUSHi" ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1)/,     "TARGi" ],
             [ 0, 0, qr/\b\QXSRETURN(1)/,              "ret 1" ],
         ],
 
@@ -2299,7 +2674,7 @@ EOF
             [ 0, 1, qr/long\s+RETVAL/,                "no long declare" ],
             [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,  "int  declare and init" ],
             [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,     "abc is ST1" ],
-            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,        "PUSHi" ],
+            [ 0, 0, qr/\b\QTARGi((IV)RETVAL, 1)/,     "TARGi" ],
             [ 0, 0, qr/\b\QXSRETURN(1)/,              "ret 1" ],
         ],
 
@@ -2834,3 +3209,315 @@ EOF
 
     test_many($preamble, 'XS_Foo_', \@test_fns);
 }
+
+{
+    # Test weird packing facility: return type array(type,nitems)
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+EOF
+
+    my @test_fns = (
+
+        [
+            "array(int,5)",
+            [ Q(<<'EOF') ],
+                |array(int,5)
+                |foo()
+EOF
+            [ 0, 0, qr/int\s*\*\s+RETVAL;/,      "RETVAL is int*" ],
+            [ 0, 0, qr/sv_setpvn\(.*,\s*5\s*\*\s*\Qsizeof(int));/,
+                                                 "return packs 5 ints" ],
+            [ 0, 0, qr/\bdXSTARG\b/,             "declares TARG" ],
+            [ 0, 0, qr/sv_setpvn\(TARG\b/,       "uses TARG" ],
+
+        ],
+
+        [
+            "array(int*, expr)",
+            [ Q(<<'EOF') ],
+                |array(int*, FOO_SIZE)
+                |foo()
+EOF
+            [ 0, 0, qr/int\s*\*\s*\*\s+RETVAL;/, "RETVAL is int**" ],
+            [ 0, 0, qr/sv_setpvn\(.*,\s*FOO_SIZE\s*\*\s*sizeof\(int\s*\*\s*\)\);/,
+                                                "return packs FOO_SIZE int*s" ],
+        ],
+
+        [
+            "array() as param type",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(abc)
+                |    array(int,5) abc
+EOF
+            [ 1, 0, qr/Could not find a typemap for C type/, " no find type" ],
+        ],
+
+        [
+            "array() can be overriden by OUTPUT",
+            [ Q(<<'EOF') ],
+                |array(int,5)
+                |foo()
+                |    OUTPUT:
+                |        RETVAL my_setintptr(ST(0), RETVAL);
+EOF
+            [ 0, 0, qr/int\s*\*\s+RETVAL;/,             "RETVAL is int*" ],
+            [ 0, 0, qr/\Qmy_setintptr(ST(0), RETVAL);/, "override honoured" ],
+        ],
+
+        [
+            "array() in output override isn't special",
+            [ Q(<<'EOF') ],
+                |short
+                |foo()
+                |    OUTPUT:
+                |        RETVAL array(int,5)
+EOF
+            [ 0, 0, qr/short\s+RETVAL;/,      "RETVAL is short" ],
+            [ 0, 0, qr/\Qarray(int,5)/,       "return expression is unchanged" ],
+        ],
+
+        [
+            "array() OUT",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(OUT array(int,5) AAA)
+EOF
+            [ 1, 0, qr/\QCan't use array(type,nitems) type for OUT parameter/,
+                        "got err" ],
+        ],
+
+        [
+            "array() OUTLIST",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(OUTLIST array(int,5) AAA)
+EOF
+            [ 1, 0, qr/\QCan't use array(type,nitems) type for OUTLIST parameter/,
+                    "got err" ],
+        ],
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
+}
+
+{
+    # Test weird packing facility: DO_ARRAY_ELEM
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+        |TYPEMAP: <<EOF
+        |intArray *        T_ARRAY
+        |longArray *       T_ARRAY
+        |
+        |myiv              T_IV
+        |myivArray *       T_ARRAY
+        |
+        |blah              T_BLAH
+        |blahArray *       T_ARRAY
+        |
+        |nosuchtypeArray * T_ARRAY
+        |
+        |shortArray *       T_DAE
+        |
+        |INPUT
+        |T_BLAH
+        |   $var = my_get_blah($arg);
+        |
+        |T_DAE
+        |   IN($var,$type,$ntype,$subtype,$arg,$argoff){DO_ARRAY_ELEM}
+        |
+        |OUTPUT
+        |T_BLAH
+        |   my_set_blah($arg, $var);
+        |
+        |T_DAE
+        |   OUT($var,$type,$ntype,$subtype,$arg){DO_ARRAY_ELEM}
+        |
+        |EOF
+EOF
+
+    my @test_fns = (
+
+        [
+            "T_ARRAY long input",
+            [ Q(<<'EOF') ],
+                |char *
+                |foo(longArray * abc)
+EOF
+            [ 0, 0, qr/longArray\s*\*\s*abc;/,      "abc is longArray*" ],
+            [ 0, 0, qr/abc\s*=\s*longArrayPtr\(/,   "longArrayPtr called" ],
+            [ 0, 0, qr/abc\[ix_abc.*\]\s*=\s*.*\QSvIV(ST(ix_abc))/,
+                                                    "abc[i] set" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+        [
+            "T_ARRAY long output",
+            [ Q(<<'EOF') ],
+                |longArray *
+                |foo()
+EOF
+            [ 0, 0, qr/longArray\s*\*\s*RETVAL;/,   "RETVAL is longArray*" ],
+            [ 0, 1, qr/longArrayPtr/,               "longArrayPtr NOT called" ],
+            [ 0, 0, qr/\Qsv_setiv(ST(ix_RETVAL), (IV)RETVAL[ix_RETVAL]);/,
+                                                    "ST(i) set" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+
+        [
+            "T_ARRAY myiv input",
+            [ Q(<<'EOF') ],
+                |char *
+                |foo(myivArray * abc)
+EOF
+            [ 0, 0, qr/myivArray\s*\*\s*abc;/,      "abc is myivArray*" ],
+            [ 0, 0, qr/abc\s*=\s*myivArrayPtr\(/,   "myivArrayPtr called" ],
+            [ 0, 0, qr/abc\[ix_abc.*\]\s*=\s*.*\QSvIV(ST(ix_abc))/,
+                                                    "abc[i] set" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+        [
+            "T_ARRAY myiv output",
+            [ Q(<<'EOF') ],
+                |myivArray *
+                |foo()
+EOF
+            [ 0, 0, qr/myivArray\s*\*\s*RETVAL;/,   "RETVAL is myivArray*" ],
+            [ 0, 1, qr/myivArrayPtr/,               "myivArrayPtr NOT called" ],
+            [ 0, 0, qr/\Qsv_setiv(ST(ix_RETVAL), (IV)RETVAL[ix_RETVAL]);/,
+                                                    "ST(i) set" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+
+        [
+            "T_ARRAY blah input",
+            [ Q(<<'EOF') ],
+                |char *
+                |foo(blahArray * abc)
+EOF
+            [ 0, 0, qr/blahArray\s*\*\s*abc;/,      "abc is blahArray*" ],
+            [ 0, 0, qr/abc\s*=\s*blahArrayPtr\(/,   "blahArrayPtr called" ],
+            [ 0, 0, qr/abc\[ix_abc.*\]\s*=\s*.*\Qmy_get_blah(ST(ix_abc))/,
+                                                    "abc[i] set" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+        [
+            "T_ARRAY blah output",
+            [ Q(<<'EOF') ],
+                |blahArray *
+                |foo()
+EOF
+            [ 0, 0, qr/blahArray\s*\*\s+RETVAL;/,   "RETVAL is blahArray*" ],
+            [ 0, 1, qr/blahArrayPtr/,               "blahArrayPtr NOT called" ],
+            [ 0, 0, qr/\Qmy_set_blah(ST(ix_RETVAL), RETVAL[ix_RETVAL]);/,
+                                                    "ST(i) set" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+
+        [
+            "T_ARRAY nosuchtype input",
+            [ Q(<<'EOF') ],
+                |char *
+                |foo(nosuchtypeArray * abc)
+EOF
+            [ 1, 0, qr/Could not find a typemap for C type 'nosuchtype'/,
+                                                    "no such type" ],
+        ],
+        [
+            "T_ARRAY nosuchtype output",
+            [ Q(<<'EOF') ],
+                |nosuchtypeArray *
+                |foo()
+EOF
+            [ 1, 0, qr/Could not find a typemap for C type 'nosuchtype'/,
+                                                    "no such type" ],
+        ],
+
+        # test DO_ARRAY_ELEM in a typemap other than T_ARRAY.
+        #
+        # XXX It's not clear whether DO_ARRAY_ELEM should be processed
+        # in typemap definitions generally, rather than just in the
+        # T_ARRAY definition. Currently it is, but DO_ARRAY_ELEM isn't
+        # documented, and was clearly put into place as a hack to make
+        # T_ARRAY work. So these tests represent the *current*
+        # behaviour, but don't necessarily endorse that behaviour. These
+        # tests ensure that any change in behaviour is deliberate rather
+        # than accidental.
+        [
+            "T_DAE input",
+            [ Q(<<'EOF') ],
+                |char *
+                |foo(shortArray * abc)
+EOF
+            [ 0, 0, qr/shortArray\s*\*\s*abc;/,      "abc is shortArray*" ],
+            # calling fooArrayPtr() is part of the T_ARRAY typemap,
+            # not part of the general mechanism
+            [ 0, 1, qr/shortArrayPtr\(/,             "no shortArrayPtr call" ],
+            [ 0, 0, qr/\{\s*abc\[ix_abc.*\]\s*=\s*.*\QSvIV(ST(ix_abc))\E\s*\n?\s*\}/,
+                                                    "abc[i] set" ],
+            [ 0, 0, qr/\QIN(abc,shortArray *,shortArrayPtr,short,ST(0),0)/,
+                                                    "template vars ok" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+        [
+            "T_DAE output",
+            [ Q(<<'EOF') ],
+                |shortArray *
+                |foo()
+EOF
+            [ 0, 0, qr/shortArray\s*\*\s*RETVAL;/,  "RETVAL is shortArray*" ],
+            [ 0, 1, qr/shortArrayPtr\(/,            "shortArrayPtr NOT called" ],
+            [ 0, 0, qr/\Qsv_setiv(ST(ix_RETVAL), (IV)RETVAL[ix_RETVAL]);/,
+                                                    "ST(i) set" ],
+            [ 0, 0, qr/\QOUT(RETVAL,shortArray *,shortArrayPtr,short,ST(0))/,
+                                                    "template vars ok" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+
+        # Use overridden return code with an OUTPUT line.
+        [
+            "T_ARRAY override output",
+            [ Q(<<'EOF') ],
+                |intArray *
+                |foo()
+                |    OUTPUT:
+                |      RETVAL my_intptr_set(ST(0), RETVAL[0]);
+EOF
+            [ 0, 0, qr/intArray\s*\*\s*RETVAL;/,   "RETVAL is intArray*" ],
+            [ 0, 1, qr/intArrayPtr/,               "intArrayPtr NOT called" ],
+            [ 0, 0, qr/\Qmy_intptr_set(ST(0), RETVAL[0]);/, "ST(0) set" ],
+            [ 0, 1, qr/DO_ARRAY_ELEM/,              "no DO_ARRAY_ELEM" ],
+        ],
+
+        # for OUT and OUTLIST arguments, don't process DO_ARRAY_ELEM
+        [
+            "T_ARRAY OUT",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(OUT intArray * abc)
+EOF
+            [ 1, 0, qr/Can't use typemap containing DO_ARRAY_ELEM for OUT parameter/,
+                    "gives err" ],
+        ],
+        [
+            "T_ARRAY OUT",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(OUTLIST intArray * abc)
+EOF
+            [ 1, 0, qr/Can't use typemap containing DO_ARRAY_ELEM for OUTLIST parameter/,
+                    "gives err" ],
+        ],
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
+}
+
+done_testing;
