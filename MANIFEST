@@ -5,6 +5,7 @@ lib/ExtUtils/ParseXS.pod
 lib/ExtUtils/ParseXS/Constants.pm
 lib/ExtUtils/ParseXS/CountLines.pm
 lib/ExtUtils/ParseXS/Eval.pm
+lib/ExtUtils/ParseXS/Node.pm
 lib/ExtUtils/ParseXS/Utilities.pm
 lib/ExtUtils/Typemaps.pm
 lib/ExtUtils/Typemaps/Cmd.pm
@@ -31,7 +32,6 @@ t/105-valid_proto_string.t
 t/106-process_typemaps.t
 t/108-map_type.t
 t/109-standard_XS_defs.t
-t/110-assign_func_args.t
 t/111-analyze_preprocessor_statements.t
 t/112-set_cond.t
 t/113-check_cond_preproc_statements.t
