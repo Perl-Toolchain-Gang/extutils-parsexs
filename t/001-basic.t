@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 use strict;
-use Test::More tests => 182;
+use Test::More tests => 472;
 use Config;
 use DynaLoader;
 use ExtUtils::CBuilder;
@@ -104,7 +104,10 @@ sub test_many {
         # test diagnostics smaller.
         if ($out =~ /\S/) {
             $out =~ s/\A.*? (^\w+\(${prefix} .*? ^}).*\z/$1/xms
-                or die "couldn't trim output for fn '$prefix'";
+                or do {
+                    # print STDERR $out;
+                    die "$desc_prefix: couldn't trim output to only function starting '$prefix'\n";
+                }
         }
 
         my $err_tested;
@@ -1461,7 +1464,9 @@ EOF
             [ 0, 0, qr/\Qfoo(A, &B, &C, &D, &E)/,      "autocall" ],
 
             [ 0, 0, qr/sv_setiv.*ST\(1\).*\bB\b/,      "set B"    ],
+            [ 0, 0, qr/\QSvSETMAGIC(ST(1))/,           "set magic B" ],
             [ 0, 0, qr/sv_setiv.*ST\(2\).*\bC\b/,      "set C"    ],
+            [ 0, 0, qr/\QSvSETMAGIC(ST(2))/,           "set magic C" ],
 
             [ 0, 0, qr/\QEXTEND(SP,2)/,                "extend"   ],
 
@@ -1626,7 +1631,7 @@ EOF
         ],
 
         [
-            # shady but legal
+            # shady but legal - placeholder
             "auto-generated proto with no type",
             [
                 'void',
@@ -1634,7 +1639,1198 @@ EOF
             ],
             [ 0, 0, qr/"\$\$;\$"/, ""  ],
         ],
+
+        [
+            "auto-generated proto with backcompat SV* placeholder",
+            [
+                'void',
+                'foo(int a, SV*, char *c = "")',
+                'C_ARGS: a, c',
+            ],
+            [ 0, 0, qr/"\$\$;\$"/, ""  ],
+        ],
     );
 
     test_many($preamble, 'boot_Foo', \@test_fns);
+}
+
+{
+    # Test RETVAL with the dXSTARG optimisation. When the return type
+    # corresponds to a simple sv_setXv($arg, $val) in the typemap,
+    # use the OP_ENTERSUB's TARG if possible, rather than creating a new
+    # mortal each time.
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+        |TYPEMAP: <<EOF
+        |const int     T_IV
+        |const long    T_MYIV
+        |
+        |INPUT
+        |T_MYIV
+        |    $var = ($type)SvIV($arg)
+        |
+        |OUTPUT
+        |T_OBJECT
+        |    sv_setiv($arg, (IV)$var);
+        |EOF
+EOF
+
+    my @test_fns = (
+        [
+            "dXSTARG int (IV)",
+            [
+                'int',
+                'foo()',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
+            [ 0, 0, qr/\bPUSHi\b/,    "has PUSHi" ],
+            [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
+        ],
+
+        [
+            # same as int, but via custom typemap entry
+            "dXSTARG const int (IV)",
+            [
+                'const int',
+                'foo()',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
+            [ 0, 0, qr/\bPUSHi\b/,    "has PUSHi" ],
+            [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
+        ],
+
+        [
+            # same as int, but via custom typemap OUTPUT entry
+            "dXSTARG const long (MYIV)",
+            [
+                'const int',
+                'foo()',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
+            [ 0, 0, qr/\bPUSHi\b/,    "has PUSHi" ],
+            [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
+        ],
+
+        [
+            "dXSTARG unsigned long (UV)",
+            [
+                'unsigned long',
+                'foo()',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
+            [ 0, 0, qr/\bPUSHu\b/,    "has PUSHu" ],
+            [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
+        ],
+
+        [
+            "dXSTARG time_t (NV)",
+            [
+                'time_t',
+                'foo()',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
+            [ 0, 0, qr/\bPUSHn\b/,    "has PUSHn" ],
+            [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
+        ],
+
+        [
+            "dXSTARG char (pvn)",
+            [
+                'char',
+                'foo()',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
+            [ 0, 0, qr/\bPUSHp\b/,    "has PUSHp" ],
+            [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
+        ],
+
+        [
+            "dXSTARG char * (PV)",
+            [
+                'char *',
+                'foo()',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,   "has targ def" ],
+            [ 0, 0, qr/\bsv_setpv\b/, "has sv_setpv" ],
+            [ 0, 0, qr/\bPUSHTARG\b/, "has PUSHTARG" ],
+            [ 0, 1, qr/sv_newmortal/, "doesn't have newmortal" ],
+        ],
+
+        [
+            "dXSTARG int (IV) with outlist",
+            [
+                'int',
+                'foo(OUTLIST int a, OUTLIST int b)',
+            ],
+            [ 0, 0, qr/\bdXSTARG;/,      "has targ def" ],
+            [ 0, 0, qr/\bXSprePUSH;/,    "has XSprePUSH" ],
+            [ 0, 1, qr/\bXSprePUSH\b.+\bXSprePUSH\b/s,
+                                         "has only one XSprePUSH" ],
+
+            [ 0, 0, qr/\bPUSHi\b/,       "has PUSHi" ],
+            [ 0, 0, qr/\bPUSHs\b.+\bPUSHs\b/s,
+                                         "has two PUSHs" ],
+
+            [ 0, 0, qr/\bXSRETURN\(3\)/, "has XSRETURN(3)" ],
+        ],
+
+        # Test RETVAL with an overridden typemap template in OUTPUT
+        [
+            "RETVAL overridden typemap: non-TARGable",
+            [
+                'int',
+                'foo()',
+                '    OUTPUT:',
+                '        RETVAL my_sv_setiv(ST(0), RETVAL);',
+            ],
+            [ 0, 0, qr/\bmy_sv_setiv\b/,   "has my_sv_setiv" ],
+        ],
+
+        [
+            "RETVAL overridden typemap: TARGable",
+            [
+                'int',
+                'foo()',
+                '    OUTPUT:',
+                '        RETVAL sv_setiv(ST(0), RETVAL);',
+            ],
+            # XXX currently the TARG optimisation isn't done
+            # XXX when this is fixed, update the test
+            [ 0, 0, qr/\bsv_setiv\b/,   "has sv_setiv" ],
+        ],
+
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
+}
+
+{
+    # Test OUTPUT: keyword
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+EOF
+
+    my @test_fns = (
+        [
+            "OUTPUT RETVAL",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int a)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      RETVAL
+EOF
+            [ 0, 1, qr/\bSvSETMAGIC\b/,   "no set magic" ],
+            [ 0, 0, qr/\bPUSHi\b/,        "has PUSHi" ],
+            [ 0, 0, qr/\QXSRETURN(1)/,    "has XSRETURN" ],
+        ],
+
+        [
+            "OUTPUT RETVAL with set magic ignored",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int a)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      SETMAGIC: ENABLE
+                |      RETVAL
+EOF
+            [ 0, 1, qr/\bSvSETMAGIC\b/,   "no set magic" ],
+            [ 0, 0, qr/\bPUSHi\b/,        "has PUSHi" ],
+            [ 0, 0, qr/\QXSRETURN(1)/,    "has XSRETURN" ],
+        ],
+
+        [
+            "OUTPUT RETVAL with code",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int a)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      RETVAL PUSHs(my_newsviv(RETVAL));
+EOF
+            [ 0, 0, qr/\QPUSHs(my_newsviv(RETVAL));/,   "uses code" ],
+            [ 0, 0, qr/\QXSRETURN(1)/,                  "has XSRETURN" ],
+        ],
+
+        [
+            "OUTPUT vars with set magic mixture",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int aaa, int bbb, int ccc, int ddd)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      RETVAL
+                |      aaa
+                |      SETMAGIC: ENABLE
+                |      bbb
+                |      SETMAGIC: DISABLE
+                |      ccc
+                |      SETMAGIC: ENABLE
+                |      ddd  my_set(xyz)
+EOF
+            [ 0, 0, qr/\b\QSvSETMAGIC(ST(0))/,       "set magic ST(0)" ],
+            [ 0, 0, qr/\b\QSvSETMAGIC(ST(1))/,       "set magic ST(1)" ],
+            [ 0, 1, qr/\b\QSvSETMAGIC(ST(2))/,       "no set magic ST(2)" ],
+            [ 0, 0, qr/\b\QSvSETMAGIC(ST(3))/,       "set magic ST(3)" ],
+            [ 0, 0, qr/\b\Qsv_setiv(ST(0),\E.*aaa/,  "setiv(aaa)" ],
+            [ 0, 0, qr/\b\Qsv_setiv(ST(1),\E.*bbb/,  "setiv(bbb)" ],
+            [ 0, 0, qr/\b\Qsv_setiv(ST(2),\E.*ccc/,  "setiv(ccc)" ],
+            [ 0, 1, qr/\b\Qsv_setiv(ST(3)/,          "no setiv(ddd)" ],
+            [ 0, 0, qr/\b\Qmy_set(xyz)/,             "myset" ],
+            [ 0, 0, qr/\bPUSHi\b.*RETVAL/,           "has PUSHi(RETVAL)" ],
+            [ 0, 0, qr/\QXSRETURN(1)/,               "has XSRETURN" ],
+        ],
+
+        [
+            "duplicate OUTPUT RETVAL",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int aaa)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      RETVAL
+                |      RETVAL
+EOF
+            [ 1, 0, qr/Error: duplicate OUTPUT parameter 'RETVAL'/, "" ],
+        ],
+
+        [
+            "duplicate OUTPUT parameter",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int aaa)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      RETVAL
+                |      aaa
+                |      aaa
+EOF
+            [ 1, 0, qr/Error: duplicate OUTPUT parameter 'aaa'/, "" ],
+        ],
+
+        [
+            "RETVAL in CODE without OUTPUT section",
+            [ Q(<<'EOF') ],
+                |int
+                |foo()
+                |    CODE:
+                |      RETVAL = 99
+EOF
+            [ 1, 0, qr/Warning: Found a 'CODE' section which seems to be using 'RETVAL' but no 'OUTPUT' section/, "" ],
+        ],
+
+        [
+            # This one *shouldn't* warn. For a void XSUB, RETVAL
+            # is just another local variable.
+            "void RETVAL in CODE without OUTPUT section",
+            [ Q(<<'EOF') ],
+                |void
+                |foo()
+                |    PREINIT:
+                |      int RETVAL;
+                |    CODE:
+                |      RETVAL = 99
+EOF
+            [ 1, 1, qr/Warning: Found a 'CODE' section which seems to be using 'RETVAL' but no 'OUTPUT' section/, "no warn" ],
+        ],
+
+        [
+            "RETVAL in CODE without being in OUTPUT",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int aaa)
+                |    CODE:
+                |      RETVAL = 99
+                |    OUTPUT:
+                |      aaa
+EOF
+            [ 1, 0, qr/Warning: Found a 'CODE' section which seems to be using 'RETVAL' but no 'OUTPUT' section/, "" ],
+        ],
+
+        [
+            "OUTPUT RETVAL not a parameter",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(int aaa)
+                |    CODE:
+                |      xyz
+                |    OUTPUT:
+                |      RETVAL
+EOF
+            [ 1, 0, qr/\QError: OUTPUT RETVAL not a parameter/, "" ],
+        ],
+
+        [
+            "OUTPUT RETVAL IS a parameter",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int aaa)
+                |    CODE:
+                |      xyz
+                |    OUTPUT:
+                |      RETVAL
+EOF
+            [ 1, 1, qr/\QError: OUTPUT RETVAL not a parameter/, "" ],
+        ],
+
+        [
+            "OUTPUT foo not a parameter",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(int aaa)
+                |    CODE:
+                |      xyz
+                |    OUTPUT:
+                |      bbb
+EOF
+            [ 1, 0, qr/\QError: OUTPUT bbb not a parameter/, "" ],
+        ],
+
+        [
+            "OUTPUT length(foo) not a parameter",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(char* aaa, int length(aaa))
+                |    CODE:
+                |      xyz
+                |    OUTPUT:
+                |      length(aaa)
+EOF
+            [ 1, 0, qr/\QError: OUTPUT length(aaa) not a parameter/, "" ],
+        ],
+
+        [
+            "OUTPUT with IN_OUTLIST",
+            [ Q(<<'EOF') ],
+                |char*
+                |foo(IN_OUTLIST int abc)
+                |    CODE:
+                |        RETVAL=999
+                |    OUTPUT:
+                |        RETVAL
+                |        abc
+EOF
+            # OUT var - update arg 0 on stack
+            [ 0, 0, qr/\b\Qsv_setiv(ST(0),\E.*abc/,  "setiv(ST0, abc)" ],
+            [ 0, 0, qr/\b\QSvSETMAGIC(ST(0))/,       "set magic ST(0)" ],
+            # prepare stack for OUTLIST
+            [ 0, 0, qr/\bXSprePUSH\b/,               "XSprePUSH" ],
+            [ 0, 0, qr/\b\QEXTEND(SP,2)/,            "EXTEND(SP,2)" ],
+            # OUTPUT: RETVAL: push return value on stack
+            [ 0, 0, qr/\bsv_setpv\(TARG,\s*RETVAL\)/,"sv_setpv(TARG, RETVAL)" ],
+            [ 0, 0, qr/\bPUSHTARG\b/,                "PUSHTARG" ],
+            # OUTLIST: push abc on stack
+            [ 0, 0, qr/\b\QPUSHs(sv_newmortal())/,   "PUSHs(sv_newmortal())" ],
+            [ 0, 0, qr/\b\Qsv_setiv(ST(1),\E.*abc\)/,"sv_setiv(ST1, abc)" ],
+            # and return TETVAL and abc
+            [ 0, 0, qr/\QXSRETURN(2)/,               "has XSRETURN" ],
+
+            # should only be one PUSHs and one SvSETMAGI
+            [ 0, 1, qr/\bPUSHs\b.*\bPUSHs\b/s,          "only one PUSHs" ],
+            [ 0, 1, qr/\bSvSETMAGIC\b.*\bSvSETMAGIC\b/s,"only one SvSETMAGIC" ],
+        ],
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
+}
+
+{
+    # Test RETVAL as a parameter. This isn't well documented as to
+    # how it should be interpreted, so these tests are more about checking
+    # current behaviour so that inadvertent changes are detected, rather
+    # than approving the current behaviour.
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+EOF
+
+    my @test_fns = (
+
+        # First, with void return type.
+        # Generally in this case, RETVAL is currently not special - it's
+        # just another name for a parameter. If it doesn't have a type
+        # specified, it's treated as a placeholder.
+
+        [
+            # XXX this generates an autocall using undeclared RETVAL,
+            # which should be an error
+            "void RETVAL no-type param autocall",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(RETVAL, short abc)
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\Qfoo(RETVAL, abc)/,              "autocall" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,              "ret empty" ],
+        ],
+
+        [
+            "void RETVAL no-type param",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(RETVAL, short abc)
+                |    CODE:
+                |        xyz
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,              "ret empty" ],
+        ],
+
+        [
+            "void RETVAL typed param autocall",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(int RETVAL, short abc)
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,     "declare and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\Qfoo(RETVAL, abc)/,              "autocall" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,              "ret empty" ],
+        ],
+
+        [
+            "void RETVAL INPUT typed param autocall",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(RETVAL, short abc)
+                |   int RETVAL
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,     "declare and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\Qfoo(RETVAL, abc)/,              "autocall" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,              "ret empty" ],
+        ],
+
+        [
+            "void RETVAL typed param",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(int RETVAL, short abc)
+                |    CODE:
+                |        xyz
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,     "declare and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,              "ret empty" ],
+        ],
+
+        [
+            "void RETVAL INPUT typed param",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(RETVAL, short abc)
+                |   int RETVAL
+                |    CODE:
+                |        xyz
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,     "declare and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,              "ret empty" ],
+        ],
+
+        [
+            "void RETVAL alien autocall",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(short abc)
+                |   int RETVAL = 99
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc"\)/,           "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=\s*99/,         "declare and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(0)/,        "abc is ST0" ],
+            [ 0, 0, qr/\Qfoo(abc)/,                      "autocall" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,              "ret empty" ],
+        ],
+
+        [
+            "void RETVAL alien",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(short abc)
+                |   int RETVAL = 99
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc"\)/,           "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=\s*99/,         "declare and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(0)/,        "abc is ST0" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,              "ret empty" ],
+        ],
+
+
+        # Next, with 'long' return type.
+        # Generally, RETVAL is treated as a normal parameter, with
+        # some bad behaviour (such as multiple definitions) when that
+        # clashes with the implicit use of RETVAL
+
+        [
+            "long RETVAL no-type param autocall",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(RETVAL, short abc)
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            # XXX RETVAL is passed uninitialised to the autocall fn
+            [ 0, 0, qr/long\s+RETVAL;/,                  "declare no init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\Qfoo(RETVAL, abc)/,              "autocall" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,                 "ret 1" ],
+        ],
+
+        [
+            "long RETVAL no-type param",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(RETVAL, short abc)
+                |    CODE:
+                |        xyz
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 0, qr/long\s+RETVAL;/,                  "declare no init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,                 "ret 1" ],
+        ],
+
+        [
+            "long RETVAL typed param autocall",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(int RETVAL, short abc)
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            # duplicate or malformed declarations used to be emitted
+            [ 0, 1, qr/int\s+RETVAL;/,                   "no none init init" ],
+            [ 0, 1, qr/long\s+RETVAL;/,                  "no none init long" ],
+
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,     "int  decl and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\bRETVAL\s*=\s*foo\(RETVAL, abc\)/,"autocall" ],
+            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,           "PUSHi" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,                 "ret 1" ],
+        ],
+
+        [
+            "long RETVAL INPUT typed param autocall",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(RETVAL, short abc)
+                |   int RETVAL
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 1, qr/long\s+RETVAL/,                   "no long decl" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,     "int  decl and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,        "abc is ST1" ],
+            [ 0, 0, qr/\bRETVAL\s*=\s*foo\(RETVAL, abc\)/,"autocall" ],
+            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,            "PUSHi" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,                  "ret 1" ],
+        ],
+
+        [
+            "long RETVAL INPUT typed param autocall 2nd pos",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(short abc, RETVAL)
+                |   int RETVAL
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc,\s*RETVAL"\)/, "usage" ],
+            [ 0, 1, qr/long\s+RETVAL/,                   "no long decl" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(1)/,     "int  decl and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(0)/,        "abc is ST0" ],
+            [ 0, 0, qr/\bRETVAL\s*=\s*foo\(abc, RETVAL\)/,"autocall" ],
+            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,            "PUSHi" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,                  "ret 1" ],
+        ],
+
+        [
+            "long RETVAL typed param",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(int RETVAL, short abc)
+                |    CODE:
+                |        xyz
+                |    OUTPUT:
+                |        RETVAL
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            # duplicate or malformed declarations used to be emitted
+            [ 0, 1, qr/int\s+RETVAL;/,                "no none init init" ],
+            [ 0, 1, qr/long\s+RETVAL;/,               "no none init long" ],
+
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,  "int  decl and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,     "abc is ST1" ],
+            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,        "PUSHi" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,              "ret 1" ],
+        ],
+
+        [
+            "long RETVAL INPUT typed param",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(RETVAL, short abc)
+                |    int RETVAL
+                |    CODE:
+                |        xyz
+                |    OUTPUT:
+                |        RETVAL
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL,\s*abc"\)/, "usage" ],
+            [ 0, 1, qr/long\s+RETVAL/,                "no long declare" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=.*\QST(0)/,  "int  declare and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(1)/,     "abc is ST1" ],
+            [ 0, 0, qr/\b\QPUSHi((IV)RETVAL)/,        "PUSHi" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,              "ret 1" ],
+        ],
+
+        [
+            "long RETVAL alien autocall",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(short abc)
+                |   int RETVAL = 99
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc"\)/,        "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=\s*99/,      "declare and init" ],
+            [ 0, 0, qr/short\s+abc\s*=.*\QST(0)/,     "abc is ST0" ],
+            [ 0, 0, qr/\bRETVAL\s*=\s*foo\(abc\)/,    "autocall" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,              "ret 1" ],
+        ],
+
+        [
+            "long RETVAL alien",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(abc, def)
+                |   int def
+                |   int RETVAL = 99
+                |   int abc
+                |  CODE:
+                |    xyz
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc,\s*def"\)/, "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=\s*99/,      "declare and init" ],
+            [ 0, 0, qr/int\s+abc\s*=.*\QST(0)/,       "abc is ST0" ],
+            [ 0, 0, qr/int\s+def\s*=.*\QST(1)/,       "def is ST1" ],
+            [ 0, 0, qr/int\s+def.*int\s+RETVAL.*int\s+abc/s,  "ordering" ],
+            [ 0, 0, qr/\b\QXSRETURN(1)/,              "ret 1" ],
+        ],
+
+
+        # Test NO_OUTPUT
+
+        [
+            "NO_OUTPUT autocall",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT long
+                |foo(int abc)
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc"\)/,        "usage" ],
+            [ 0, 0, qr/long\s+RETVAL;/,               "long declare  no init" ],
+            [ 0, 0, qr/int\s+abc\s*=.*\QST(0)/,       "abc is ST0" ],
+            [ 0, 0, qr/\bRETVAL\s*=\s*foo\(abc\)/,    "autocall" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,           "ret empty" ],
+        ],
+
+        [
+            # NO_OUTPUT with void should be a NOOP, but check
+            "NO_OUTPUT void autocall",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT void
+                |foo(int abc)
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc"\)/,        "usage" ],
+            [ 0, 1, qr/\s+RETVAL;/,                   "don't declare RETVAL" ],
+            [ 0, 0, qr/int\s+abc\s*=.*\QST(0)/,       "abc is ST0" ],
+            [ 0, 0, qr/^\s*foo\(abc\)/m,              "void autocall" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,           "ret empty" ],
+        ],
+
+        [
+            "NO_OUTPUT with RETVAL autocall",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT long
+                |foo(int RETVAL)
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL"\)/,     "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=/,           "declare and init" ],
+            [ 0, 0, qr/\bRETVAL\s*=\s*foo\(RETVAL\)/, "autocall" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,           "ret empty" ],
+        ],
+
+        [
+            "NO_OUTPUT with CODE",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT long
+                |foo(int abc)
+                |   CODE:
+                |      xyz
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc"\)/,        "usage" ],
+            [ 0, 0, qr/long\s+RETVAL;/,               "long declare  no init" ],
+            [ 0, 0, qr/int\s+abc\s*=.*\QST(0)/,       "abc is ST0" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,           "ret empty" ],
+        ],
+
+        [
+            # NO_OUTPUT with void should be a NOOP, but check
+            "NO_OUTPUT void with CODE",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT void
+                |foo(int abc)
+                |   CODE:
+                |      xyz
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc"\)/,        "usage" ],
+            [ 0, 1, qr/\s+RETVAL;/,                   "don't declare RETVAL" ],
+            [ 0, 0, qr/int\s+abc\s*=.*\QST(0)/,       "abc is ST0" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,           "ret empty" ],
+        ],
+
+        [
+            "NO_OUTPUT with RETVAL and CODE",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT long
+                |foo(int RETVAL)
+                |   CODE:
+                |      xyz
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"RETVAL"\)/,     "usage" ],
+            [ 0, 0, qr/\bint\s+RETVAL\s*=/,           "declare and init" ],
+            [ 0, 0, qr/\bXSRETURN_EMPTY\b/,           "ret empty" ],
+        ],
+
+
+        [
+            "NO_OUTPUT with CODE and OUTPUT",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT long
+                |foo(int abc)
+                |   CODE:
+                |      xyz
+                |   OUTPUT:
+                |      RETVAL
+EOF
+            [ 1, 0, qr/Error: can't use RETVAL in OUTPUT when NO_OUTPUT declared/,  "OUTPUT err" ],
+        ],
+
+        [
+            "NO_OUTPUT with RETVAL param and OUTPUT",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT long
+                |foo(int RETVAL)
+                |   OUTPUT:
+                |      RETVAL
+EOF
+            [ 1, 0, qr/Error: can't use RETVAL in OUTPUT when NO_OUTPUT declared/,  "OUTPUT err" ],
+        ],
+
+        [
+            "NO_OUTPUT with RETVAL param, CODE and OUTPUT",
+            [ Q(<<'EOF') ],
+                |NO_OUTPUT long
+                |foo(int RETVAL)
+                |   CODE:
+                |      xyz
+                |   OUTPUT:
+                |      RETVAL
+EOF
+            [ 1, 0, qr/Error: can't use RETVAL in OUTPUT when NO_OUTPUT declared/,  "OUTPUT err" ],
+        ],
+
+
+        # Test duplicate RETVAL parameters
+
+        [
+            "void dup",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(RETVAL, RETVAL)
+EOF
+            [ 1, 0, qr/Error: duplicate definition of parameter 'RETVAL'/,  "" ],
+        ],
+
+        [
+            "void dup typed",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(int RETVAL, short RETVAL)
+EOF
+            [ 1, 0, qr/Error: duplicate definition of parameter 'RETVAL'/,  "" ],
+        ],
+
+        [
+            "void dup INPUT",
+            [ Q(<<'EOF') ],
+                |void
+                |foo(RETVAL, RETVAL)
+                |   int RETVAL
+EOF
+            [ 1, 0, qr/Error: duplicate definition of parameter 'RETVAL'/,  "" ],
+        ],
+
+        [
+            "long dup",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(RETVAL, RETVAL)
+EOF
+            [ 1, 0, qr/Error: duplicate definition of parameter 'RETVAL'/,  "" ],
+        ],
+
+        [
+            "long dup typed",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(int RETVAL, short RETVAL)
+EOF
+            [ 1, 0, qr/Error: duplicate definition of parameter 'RETVAL'/,  "" ],
+        ],
+
+        [
+            "long dup INPUT",
+            [ Q(<<'EOF') ],
+                |long
+                |foo(RETVAL, RETVAL)
+                |   int RETVAL
+EOF
+            [ 1, 0, qr/Error: duplicate definition of parameter 'RETVAL'/,  "" ],
+        ],
+
+
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
+}
+
+{
+    # Test RETVAL return mixed types.
+    # Where the return type of the XSUB differs from the declared type
+    # of the RETVAL var. For backwards compatibility, we should use the
+    # XSUB type when returning.
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+        |TYPEMAP: <<EOF
+        |my_type    T_MY_TYPE
+        |
+        |OUTPUT
+        |T_MY_TYPE
+        |    sv_set_my_type($arg, (my_type)$var);
+        |EOF
+EOF
+
+    my @test_fns = (
+
+        [
+            "RETVAL mixed type",
+            [ Q(<<'EOF') ],
+                |my_type
+                |foo(int RETVAL)
+EOF
+            [ 0, 0, qr/int\s+RETVAL\s*=.*SvIV\b/,  "RETVAL is int" ],
+            [ 0, 0, qr/sv_set_my_type\(/,          "return is my_type" ],
+        ],
+
+        [
+            "RETVAL mixed type INPUT",
+            [ Q(<<'EOF') ],
+                |my_type
+                |foo(RETVAL)
+                |    int RETVAL
+EOF
+            [ 0, 0, qr/int\s+RETVAL\s*=.*SvIV\b/,  "RETVAL is int" ],
+            [ 0, 0, qr/sv_set_my_type\(/,          "return is my_type" ],
+        ],
+
+        [
+            "RETVAL mixed type alien",
+            [ Q(<<'EOF') ],
+                |my_type
+                |foo()
+                |  int RETVAL = 99;
+EOF
+            [ 0, 0, qr/int\s+RETVAL\s*=\s*99/,     "RETVAL is int" ],
+            [ 0, 0, qr/sv_set_my_type\(/,          "return is my_type" ],
+        ],
+
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
+}
+
+{
+    # Test CASE: blocks
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+EOF
+
+    my @test_fns = (
+
+        [
+            "CASE with dup INPUT and OUTPUT",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(abc, def)
+                |    CASE: X
+                |            int   abc;
+                |            short def;
+                |        CODE:
+                |            RETVAL = abc + def;
+                |        OUTPUT:
+                |            RETVAL
+                |
+                |    CASE: Y
+                |            long abc;
+                |            long def;
+                |        CODE:
+                |            RETVAL = abc - def;
+                |        OUTPUT:
+                |            RETVAL
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"abc, def"\)/,     "usage" ],
+
+            [ 0, 0, qr/
+                       if \s* \(X\)
+                       .*
+                       int \s+ abc \s* = [^\n]* ST\(0\)
+                       .*
+                       else \s+ if \s* \(Y\)
+                      /xs,                       "1st abc is int and ST(0)" ],
+            [ 0, 0, qr/
+                       else \s+ if \s* \(Y\)
+                       .*
+                       long \s+ abc \s* = [^\n]* ST\(0\)
+                      /xs,                       "2nd abc is long and ST(0)" ],
+            [ 0, 0, qr/
+                       if \s* \(X\)
+                       .*
+                       short \s+ def \s* = [^\n]* ST\(1\)
+                       .*
+                       else \s+ if \s* \(Y\)
+                      /xs,                       "1st def is short and ST(1)" ],
+            [ 0, 0, qr/
+                       else \s+ if \s* \(Y\)
+                       .*
+                       long \s+ def \s* = [^\n]* ST\(1\)
+                      /xs,                       "2nd def is long and ST(1)" ],
+            [ 0, 0, qr/
+                       if \s* \(X\)
+                       .*
+                       int \s+ RETVAL;
+                       .*
+                       else \s+ if \s* \(Y\)
+                      /xs,                       "1st RETVAL is int" ],
+            [ 0, 0, qr/
+                       else \s+ if \s* \(Y\)
+                       .*
+                       int \s+ RETVAL;
+                       .*
+                      /xs,                       "2nd RETVAL is int" ],
+
+            [ 0, 0, qr/
+                       if \s* \(X\)
+                       .*
+                       \QRETVAL = abc + def;\E
+                       .*
+                       else \s+ if \s* \(Y\)
+                      /xs,                       "1st RETVAL assign" ],
+            [ 0, 0, qr/
+                       else \s+ if \s* \(Y\)
+                       .*
+                       \QRETVAL = abc - def;\E
+                       .*
+                      /xs,                       "2nd RETVAL assign" ],
+
+            [ 0, 0, qr/\b\QXSRETURN(1)/,           "ret 1" ],
+            [ 0, 1, qr/\bXSRETURN\b.*\bXSRETURN/s, "only a single XSRETURN" ],
+        ],
+
+
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
+}
+
+{
+    # Test placeholders - various semi-official ways to to mark an
+    # argument as 'unused'.
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+EOF
+
+    my @test_fns = (
+
+        [
+            "placeholder: typeless param with CODE",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, BBB, int CCC)
+                |   CODE:
+                |      XYZ;
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"AAA, BBB, CCC"\)/,      "usage" ],
+            [ 0, 0, qr/\bint\s+AAA\s*=\s*.*\Q(ST(0))/,        "AAA is ST(0)" ],
+            [ 0, 0, qr/\bint\s+CCC\s*=\s*.*\Q(ST(2))/,        "CCC is ST(2)" ],
+            [ 0, 1, qr/\bBBB;/,                               "no BBB decl" ],
+        ],
+
+        [
+            "placeholder: typeless param bodiless",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, BBB, int CCC)
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"AAA, BBB, CCC"\)/,      "usage" ],
+            # Note that autocall uses the BBB var even though it isn't
+            # declared. It would be up to the coder to use C_ARGS, or add
+            # such a var via PREINIT.
+            [ 0, 0, qr/\bRETVAL\s*=\s*\Qfoo(AAA, BBB, CCC);/, "autocall" ],
+            [ 0, 0, qr/\bint\s+AAA\s*=\s*.*\Q(ST(0))/,        "AAA is ST(0)" ],
+            [ 0, 0, qr/\bint\s+CCC\s*=\s*.*\Q(ST(2))/,        "CCC is ST(2)" ],
+            [ 0, 1, qr/\bBBB;/,                               "no BBB decl" ],
+        ],
+
+        [
+            # this is the only IN/OUT etc one which works, since IN is the
+            # default.
+            "placeholder: typeless IN param with CODE",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, IN BBB, int CCC)
+                |   CODE:
+                |      XYZ;
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"AAA, BBB, CCC"\)/,      "usage" ],
+            [ 0, 0, qr/\bint\s+AAA\s*=\s*.*\Q(ST(0))/,        "AAA is ST(0)" ],
+            [ 0, 0, qr/\bint\s+CCC\s*=\s*.*\Q(ST(2))/,        "CCC is ST(2)" ],
+            [ 0, 1, qr/\bBBB;/,                               "no BBB decl" ],
+        ],
+
+
+        [
+            "placeholder: typeless OUT param with CODE",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, OUT BBB, int CCC)
+                |   CODE:
+                |      XYZ;
+EOF
+            [ 1, 0, qr/Can't determine output type for 'BBB'/, "got type err" ],
+        ],
+
+        [
+            "placeholder: typeless IN_OUT param with CODE",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, IN_OUT BBB, int CCC)
+                |   CODE:
+                |      XYZ;
+EOF
+            [ 1, 0, qr/Can't determine output type for 'BBB'/, "got type err" ],
+        ],
+
+        [
+            "placeholder: typeless OUTLIST param with CODE",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, OUTLIST BBB, int CCC)
+                |   CODE:
+                |      XYZ;
+EOF
+            [ 1, 0, qr/Can't determine output type for 'BBB'/, "got type err" ],
+        ],
+
+        [
+            # a placeholder with a default value may not seem to make much
+            # sense, but it allows an argument to still be passed (or
+            # not), even if it;s no longer used.
+            "placeholder: typeless default param with CODE",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, BBB = 888, int CCC = 999)
+                |   CODE:
+                |      XYZ;
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*"AAA, BBB = 888, CCC\s*= 999"\)/,"usage" ],
+            [ 0, 0, qr/\bint\s+AAA\s*=\s*.*\Q(ST(0))/,        "AAA is ST(0)" ],
+            [ 0, 0, qr/\bCCC\s*=\s*.*\Q(ST(2))/,              "CCC is ST(2)" ],
+            [ 0, 1, qr/\bBBB;/,                               "no BBB decl" ],
+            [ 0, 1, qr/\b888\s*;/,                            "no 888 usage" ],
+        ],
+
+        [
+            "placeholder: allow SV *",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, SV *, int CCC)
+                |   CODE:
+                |      XYZ;
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*\Q"AAA, SV *, CCC")/,    "usage" ],
+            [ 0, 0, qr/\bint\s+AAA\s*=\s*.*\Q(ST(0))/,        "AAA is ST(0)" ],
+            [ 0, 0, qr/\bint\s+CCC\s*=\s*.*\Q(ST(2))/,        "CCC is ST(2)" ],
+        ],
+
+        [
+            # Bodiless XSUBs can't use SV* as a placeholder ...
+            "placeholder: SV *, bodiless",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, SV    *, int CCC)
+EOF
+            [ 1, 0, qr/Error: parameter 'SV \*' not valid as a C argument/,
+                                                           "got arg err" ],
+        ],
+
+        [
+            # ... unless they use C_ARGS to define how the C fn should
+            # be called.
+            "placeholder: SV *, bodiless C_ARGS",
+            [ Q(<<'EOF') ],
+                |int
+                |foo(int AAA, SV    *, int CCC)
+                |    C_ARGS: AAA, CCC
+EOF
+            [ 0, 0, qr/_usage\(cv,\s*\Q"AAA, SV *, CCC")/,    "usage" ],
+            [ 0, 0, qr/\bint\s+AAA\s*=\s*.*\Q(ST(0))/,        "AAA is ST(0)" ],
+            [ 0, 0, qr/\bint\s+CCC\s*=\s*.*\Q(ST(2))/,        "CCC is ST(2)" ],
+            [ 0, 0, qr/\bRETVAL\s*=\s*\Qfoo(AAA, CCC);/,      "autocall" ],
+        ],
+
+
+    );
+
+    test_many($preamble, 'XS_Foo_', \@test_fns);
 }

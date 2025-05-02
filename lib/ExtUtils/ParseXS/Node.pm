@@ -2,7 +2,7 @@ package ExtUtils::ParseXS::Node;
 use strict;
 use warnings;
 
-our $VERSION = '3.55';
+our $VERSION = '3.56';
 
 =head1 NAME
 
@@ -70,7 +70,7 @@ sub new {
         %$self = %$args;
     }
     else {
-        $self = bless $args => $class;
+        $self = bless { %$args } => $class;
     }
     return $self;
 }
@@ -110,6 +110,11 @@ BEGIN {
         'is_addr',   # INPUT var declared as '&foo'
         'is_alien',  # var declared in INPUT line, but not in signature
         'in_input',  # the parameter has appeared in an INPUT statement
+
+        # values derived from the XSUB's OUTPUT line
+        'in_output',   # the parameter has appeared in an OUTPUT statement
+        'do_setmagic', # 'SETMAGIC: ENABLE' was active for this parameter
+        'output_code', # the optional setting-code for this parameter
 
         # derived values calculated later
         'defer',     # deferred initialisation template code
@@ -159,7 +164,7 @@ sub as_code {
     my ($type, $arg_num, $var, $init, $no_init, $defer, $default)
         = @{$self}{qw(type arg_num var init no_init defer default)};
   
-    my $arg = $pxs->ST($arg_num, 0);
+    my $arg = $pxs->ST($arg_num);
   
     if ($self->{is_length}) {
         # Process length(foo) parameter.
@@ -451,8 +456,17 @@ BEGIN {
 
     our @FIELDS = (
         @ExtUtils::ParseXS::Node::FIELDS,
+        'orig_params',   # Array ref of Node::Param objects representing
+                         # the original (as parsed) parameters of this XSUB
+
         'params',        # Array ref of Node::Param objects representing
-                         # the parameters of this XSUB
+                         # the current parameters of this XSUB - this
+                         # is orig_params plus any updated fields from
+                         # processing INPUT and OUTPUT lines. Note that
+                         # with multiple CASE: blocks, there can be
+                         # multiple sets of INPUT and OUTPUT etc blocks.
+                         # params is reset to the contents of orig_params
+                         # after the start of each new CASE: block.
 
         'names',         # Hash ref mapping variable names to Node::Param
                          # objects
@@ -526,217 +540,284 @@ $C_arg = qr/ (?: (?> [^()\[\]{},"']+ )
 
 
 sub parse {
-  my ExtUtils::ParseXS::Node::Sig $self = shift;
-  my ExtUtils::ParseXS            $pxs  = shift;
+    my ExtUtils::ParseXS::Node::Sig $self = shift;
+    my ExtUtils::ParseXS            $pxs  = shift;
 
-  # remove line continuation chars (\)
-  $self->{sig_text} =~ s/\\\s*/ /g;
-  my $sig_text = $self->{sig_text};
+    # remove line continuation chars (\)
+    $self->{sig_text} =~ s/\\\s*/ /g;
+    my $sig_text = $self->{sig_text};
 
-  my @param_texts;
-  my $opt_args = 0; # how many params with default values seen
-  my $nargs    = 0; # how many args are expected
+    my @param_texts;
+    my $opt_args = 0; # how many params with default values seen
+    my $nargs    = 0; # how many args are expected
 
-  # First, split signature into separate parameters
+    # First, split signature into separate parameters
 
-  if ($sig_text =~ /\S/) {
-    my $sig_c = "$sig_text ,";
-    use re 'eval'; # needed for 5.16.0 and earlier
-    my $can_use_regex = ($sig_c =~ /^( (??{ $C_arg }) , )* $ /x);
-    no re 'eval';
+    if ($sig_text =~ /\S/) {
+        my $sig_c = "$sig_text ,";
+        use re 'eval'; # needed for 5.16.0 and earlier
+        my $can_use_regex = ($sig_c =~ /^( (??{ $C_arg }) , )* $ /x);
+        no re 'eval';
 
-    if ($can_use_regex) {
-      # If the parameters are capable of being split by using the fancy
-      # regex, do so. This splits the params on commas, but can handle
-      # things like foo(a = ",", b)
-      use re 'eval';
-      @param_texts = ($sig_c =~ /\G ( (??{ $C_arg }) ) , /xg);
-    }
-    else {
-      # This is the fallback parameter-splitting path for when the $C_arg
-      # regex doesn't work. This code path should ideally never be
-      # reached, and indicates a design weakness in $C_arg.
-      @param_texts = split(/\s*,\s*/, $sig_text);
-      Warn($pxs, "Warning: cannot parse parameter list '$sig_text', fallback to split");
-    }
-  }
-  else {
-    @param_texts = ();
-  }
-
-  # C++ methods get a fake object/class param at the start.
-  # This affects arg numbering.
-  if (defined($pxs->{xsub_class})) {
-    my ($var, $type) =
-      ($pxs->{xsub_seen_static} or $pxs->{xsub_func_name} eq 'new')
-        ? ('CLASS', "char *")
-        : ('THIS',  "$pxs->{xsub_class} *");
-
-    my ExtUtils::ParseXS::Node::Param $param
-        = ExtUtils::ParseXS::Node::Param->new( {
-            var          => $var,
-            type         => $type,
-            is_synthetic => 1,
-            arg_num      => ++$nargs,
-          });
-    push @{$self->{params}}, $param;
-    $self->{names}{$var} = $param;
-    $param->check($pxs)
-  }
-
-  for (@param_texts) {
-    # Process each parameter. A parameter is of the general form:
-    #
-    #    OUT char* foo = expression
-    #
-    #  where:
-    #    IN/OUT/OUTLIST etc are only allowed under
-    #                      $pxs->{config_allow_inout}
-    #
-    #    a C type       is only allowed under
-    #                      $pxs->{config_allow_argtypes}
-    #
-    #    foo            can be a plain C variable name, or can be
-    #    length(foo)    but only under $pxs->{config_allow_argtypes}
-    #
-    #    = default      default value - only allowed under
-    #                      $pxs->{config_allow_argtypes}
-
-    s/^\s+//;
-    s/\s+$//;
-
-    # Process ellipsis (...)
-
-    $pxs->blurt("further XSUB parameter seen after ellipsis (...)")
-      if $self->{seen_ellipsis};
-
-    if ($_ eq '...') {
-      $self->{seen_ellipsis} = 1;
-      next;
-    }
-
-    # Decompose parameter into its components.
-    # Note that $name can be either 'foo' or 'length(foo)'
-
-    my ($out_type, $type, $name, $sp1, $sp2, $default) =
-        /^
-           (?:
-             (IN|IN_OUT|IN_OUTLIST|OUT|OUTLIST)
-             \b\s*
-           )?
-           (.*?)                             # optional type
-           \s*
-           \b
-           (   \w+                           # var
-             | length\( \s*\w+\s* \)         # length(var)
-           )
-           (?:
-              (\s*) = (\s*) ( .*?)           # default expr
-           )?
-           \s*
-         $
-        /x;
-
-    unless (defined $name) {
-      $pxs->blurt("Unparseable XSUB parameter: '$_'");
-      next;
-    }
-
-    my ExtUtils::ParseXS::Node::Param $param
-        = ExtUtils::ParseXS::Node::Param->new( {
-            var => $name,
-          });
-
-    if (exists $self->{names}{$name}) {
-      $pxs->blurt(
-          "Error: duplicate definition of parameter '$name' ignored");
-      next;
-    }
-
-    push @{$self->{params}}, $param;
-    $self->{names}{$name} = $param;
-
-    # Process optional IN/OUT etc modifier
-
-    if (defined $out_type) {
-      if ($pxs->{config_allow_inout}) {
-        $out_type =  $1 eq 'IN' ? '' : $1;
-      }
-      else {
-        $pxs->blurt("parameter IN/OUT modifier not allowed under -noinout");
-      }
-    }
-    else {
-      $out_type = '';
-    }
-
-    # Process optional type
-
-    undef $type unless length($type) && $type =~ /\S/;
-
-    if (defined($type) && !$pxs->{config_allow_argtypes}) {
-      $pxs->blurt("parameter type not allowed under -noargtypes");
-      undef $type;
-    }
-
-    # Process 'length(foo)' pseudo-parameter
-
-    my $is_length;
-    my $len_name;
-
-    if ($name =~ /^length\( \s* (\w+) \s* \)\z/x) {
-      if ($pxs->{config_allow_argtypes}) {
-        $len_name = $1;
-        $is_length = 1;
-        if (defined $default) {
-          $pxs->blurt("Default value not allowed on length() parameter '$len_name'");
-          undef $default;
+        if ($can_use_regex) {
+            # If the parameters are capable of being split by using the
+            # fancy regex, do so. This splits the params on commas, but
+            # can handle things like foo(a = ",", b)
+            use re 'eval';
+            @param_texts = ($sig_c =~ /\G ( (??{ $C_arg }) ) , /xg);
         }
-      }
-      else {
-        $pxs->blurt("length() pseudo-parameter not allowed under -noargtypes");
-      }
-    }
-
-    # Handle ANSI params: those which have a type or 'length(s)',
-    # and which thus don't need a matching INPUT line.
-
-    if (defined $type or $is_length) { # 'int foo' or 'length(foo)'
-      @$param{qw(type is_ansi)} = ($type, 1);
-
-      if ($is_length) {
-        $param->{no_init}   = 1;
-        $param->{is_length} = 1;
-        $param->{len_name}  = $len_name;
-      }
-    }
-
-    $param->{in_out} = $out_type if length $out_type;
-    $param->{no_init} = 1        if $out_type =~ /^OUT/;
-
-    # Process the default expression, including making the text
-    # to be used in "usage: ..." error messages.
-    my $report_def = '';
-    if (defined $default) {
-      $opt_args++;
-      # The default expression for reporting usage. For backcompat,
-      # sometimes preserve the spaces either side of the '='
-      $report_def =    ((defined $type or $is_length) ? '' : $sp1)
-                     . "=$sp2$default";
-      $param->{default_usage} = $report_def;
-      $param->{default} = $default;
-    }
-
-    if ($out_type eq "OUTLIST" or $is_length) {
-      $param->{arg_num} = undef;
+        else {
+            # This is the fallback parameter-splitting path for when the
+            # $C_arg regex doesn't work. This code path should ideally
+            # never be reached, and indicates a design weakness in $C_arg.
+            @param_texts = split(/\s*,\s*/, $sig_text);
+            Warn($pxs, "Warning: cannot parse parameter list '$sig_text', fallback to split");
+        }
     }
     else {
-      $param->{arg_num} = ++$nargs;
+        @param_texts = ();
     }
-  } # for (@param_texts)
 
-  $self->{nargs}    = $nargs;
-  $self->{min_args} = $nargs - $opt_args;
+    # C++ methods get a fake object/class param at the start.
+    # This affects arg numbering.
+    if (defined($pxs->{xsub_class})) {
+        my ($var, $type) =
+            ($pxs->{xsub_seen_static} or $pxs->{xsub_func_name} eq 'new')
+                ? ('CLASS', "char *")
+                : ('THIS',  "$pxs->{xsub_class} *");
+
+        my ExtUtils::ParseXS::Node::Param $param
+                = ExtUtils::ParseXS::Node::Param->new( {
+                        var          => $var,
+                        type         => $type,
+                        is_synthetic => 1,
+                        arg_num      => ++$nargs,
+                    });
+        push @{$self->{params}}, $param;
+        $self->{names}{$var} = $param;
+        $param->check($pxs)
+    }
+
+    # For non-void return types, add a fake RETVAL parameter. This triggers
+    # the emitting of an 'int RETVAL;' declaration or similar, and (e.g. if
+    # later flagged as in_output), triggers the emitting of code to return
+    # RETVAL's value.
+    #
+    # Note that a RETVAL param can be in three main states:
+    #
+    #  fully-synthetic  What is being created here. RETVAL hasn't appeared
+    #                   in a signature or INPUT.
+    #
+    #  semi-real        Same as fully-synthetic, but with a defined
+    #                   arg_num, and with an updated position within
+    #                   @{$self->{params}}.
+    #                   A RETVAL has appeared in the signature, but
+    #                   without a type yet specified, so it continues to
+    #                   use {xsub_return_type}.
+    #
+    #  real             is_synthetic, no_init flags turned off. Its
+    #                   type comes from the sig or INPUT line. This is
+    #                   just a normal parameter now.
+
+    if ($pxs->{xsub_return_type} ne 'void') {
+        my ExtUtils::ParseXS::Node::Param $param =
+            ExtUtils::ParseXS::Node::Param->new( {
+                var          => 'RETVAL',
+                type         => $pxs->{xsub_return_type},
+                no_init      => 1, # just declare the var, don't initialise it
+                is_synthetic => 1,
+            } );
+
+        push @{$self->{params}}, $param;
+        $self->{names}{RETVAL} = $param;
+        $param->check($pxs)
+    }
+
+    for (@param_texts) {
+        # Process each parameter. A parameter is of the general form:
+        #
+        #    OUT char* foo = expression
+        #
+        #  where:
+        #    IN/OUT/OUTLIST etc are only allowed under
+        #                      $pxs->{config_allow_inout}
+        #
+        #    a C type       is only allowed under
+        #                      $pxs->{config_allow_argtypes}
+        #
+        #    foo            can be a plain C variable name, or can be
+        #    length(foo)    but only under $pxs->{config_allow_argtypes}
+        #
+        #    = default      default value - only allowed under
+        #                      $pxs->{config_allow_argtypes}
+
+        s/^\s+//;
+        s/\s+$//;
+
+        # Process ellipsis (...)
+
+        $pxs->blurt("further XSUB parameter seen after ellipsis (...)")
+            if $self->{seen_ellipsis};
+
+        if ($_ eq '...') {
+            $self->{seen_ellipsis} = 1;
+            next;
+        }
+
+        # Decompose parameter into its components.
+        # Note that $name can be either 'foo' or 'length(foo)'
+
+        my ($out_type, $type, $name, $sp1, $sp2, $default) =
+                /^
+                     (?:
+                         (IN|IN_OUT|IN_OUTLIST|OUT|OUTLIST)
+                         \b\s*
+                     )?
+                     (.*?)                             # optional type
+                     \s*
+                     \b
+                     (   \w+                           # var
+                         | length\( \s*\w+\s* \)       # length(var)
+                     )
+                     (?:
+                            (\s*) = (\s*) ( .*?)       # default expr
+                     )?
+                     \s*
+                 $
+                /x;
+
+        unless (defined $name) {
+            if (/^ SV \s* \* $/x) {
+                # special-case SV* as a placeholder for backwards
+                # compatibility.
+                push @{$self->{params}},
+                    ExtUtils::ParseXS::Node::Param->new( {
+                        var     => 'SV *',
+                        arg_num => ++$nargs,
+                    });
+            }
+            else {
+                $pxs->blurt("Unparseable XSUB parameter: '$_'");
+            }
+            next;
+        }
+
+        undef $type unless length($type) && $type =~ /\S/;
+
+        my ExtUtils::ParseXS::Node::Param $param
+                = ExtUtils::ParseXS::Node::Param->new( {
+                        var => $name,
+                    });
+
+        # Check for duplicates
+
+        my $old_param = $self->{names}{$name};
+        if ($old_param) {
+            if (    $name eq 'RETVAL'
+                    and $old_param->{is_synthetic}
+                    and !defined $old_param->{arg_num})
+            {
+                # RETVAL is currently fully synthetic. Now that it has
+                # been declared as a parameter too, override any implicit
+                # RETVAL declaration. Delete the original param from the
+                # param list.
+                @{$self->{params}} = grep $_ != $old_param, @{$self->{params}};
+                # If the param declaration includes a type, it becomes a
+                # real parameter. Otherwise the param is kept as
+                # 'semi-real' (synthetic, but with an arg_num) until such
+                # time as it gets a type set in INPUT, which would remove
+                # the synthetic/no_init.
+                $param = $old_param if !defined $type;
+            }
+            else {
+                $pxs->blurt(
+                        "Error: duplicate definition of parameter '$name' ignored");
+                next;
+            }
+        }
+
+        push @{$self->{params}}, $param;
+        $self->{names}{$name} = $param;
+
+        # Process optional IN/OUT etc modifier
+
+        if (defined $out_type) {
+            if ($pxs->{config_allow_inout}) {
+                $out_type =  $out_type eq 'IN' ? '' : $out_type;
+            }
+            else {
+                $pxs->blurt("parameter IN/OUT modifier not allowed under -noinout");
+            }
+        }
+        else {
+            $out_type = '';
+        }
+
+        # Process optional type
+
+        if (defined($type) && !$pxs->{config_allow_argtypes}) {
+            $pxs->blurt("parameter type not allowed under -noargtypes");
+            undef $type;
+        }
+
+        # Process 'length(foo)' pseudo-parameter
+
+        my $is_length;
+        my $len_name;
+
+        if ($name =~ /^length\( \s* (\w+) \s* \)\z/x) {
+            if ($pxs->{config_allow_argtypes}) {
+                $len_name = $1;
+                $is_length = 1;
+                if (defined $default) {
+                    $pxs->blurt("Default value not allowed on length() parameter '$len_name'");
+                    undef $default;
+                }
+            }
+            else {
+                $pxs->blurt("length() pseudo-parameter not allowed under -noargtypes");
+            }
+        }
+
+        # Handle ANSI params: those which have a type or 'length(s)',
+        # and which thus don't need a matching INPUT line.
+
+        if (defined $type or $is_length) { # 'int foo' or 'length(foo)'
+            @$param{qw(type is_ansi)} = ($type, 1);
+
+            if ($is_length) {
+                $param->{no_init}   = 1;
+                $param->{is_length} = 1;
+                $param->{len_name}  = $len_name;
+            }
+        }
+
+        $param->{in_out} = $out_type if length $out_type;
+        $param->{no_init} = 1        if $out_type =~ /^OUT/;
+
+        # Process the default expression, including making the text
+        # to be used in "usage: ..." error messages.
+        my $report_def = '';
+        if (defined $default) {
+            $opt_args++;
+            # The default expression for reporting usage. For backcompat,
+            # sometimes preserve the spaces either side of the '='
+            $report_def =    ((defined $type or $is_length) ? '' : $sp1)
+                           . "=$sp2$default";
+            $param->{default_usage} = $report_def;
+            $param->{default} = $default;
+        }
+
+        if ($out_type eq "OUTLIST" or $is_length) {
+            $param->{arg_num} = undef;
+        }
+        else {
+            $param->{arg_num} = ++$nargs;
+        }
+    } # for (@param_texts)
+
+    $self->{nargs}    = $nargs;
+    $self->{min_args} = $nargs - $opt_args;
 }
 
 
@@ -769,13 +850,24 @@ sub usage_string {
 
 sub C_func_signature {
     my ExtUtils::ParseXS::Node::Sig $self = shift;
+    my ExtUtils::ParseXS            $pxs  = shift;
 
     my @args;
     for my $param (@{$self->{params}}) {
-        next if $param->{is_synthetic}; # THIS etc
+        next if    $param->{is_synthetic} # THIS/CLASS/RETVAL
+                   # if a synthetic RETVAL has acquired an arg_num, then
+                   # it's appeared in the signature (although without a
+                   # type) and has become semi-real.
+                && !($param->{var} eq 'RETVAL' && defined($param->{arg_num}));
 
         if ($param->{is_length}) {
             push @args, "XSauto_length_of_$param->{len_name}";
+            next;
+        }
+
+        if ($param->{var} eq 'SV *') {
+            #backcompat placeholder
+            $pxs->blurt("Error: parameter 'SV *' not valid as a C argument");
             next;
         }
 

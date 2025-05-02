@@ -64,7 +64,7 @@ use Symbol;
 
 our $VERSION;
 BEGIN {
-  $VERSION = '3.55';
+  $VERSION = '3.56';
   require ExtUtils::ParseXS::Constants; ExtUtils::ParseXS::Constants->VERSION($VERSION);
   require ExtUtils::ParseXS::CountLines; ExtUtils::ParseXS::CountLines->VERSION($VERSION);
   require ExtUtils::ParseXS::Node; ExtUtils::ParseXS::Node->VERSION($VERSION);
@@ -231,7 +231,7 @@ BEGIN {
 
   # Per-XSUB parsing state:
 
-  'xsub_seen_NO_RETURN',       # Bool: XSUB declared as NO_RETURN
+  'xsub_seen_NO_OUTPUT',       # Bool: XSUB declared as NO_OUTPUT
 
   'xsub_seen_extern_C',        # Bool: XSUB return type is 'extern "C" ...'
 
@@ -309,30 +309,10 @@ BEGIN {
   'xsub_alias_clash_hinted',   # Bool: an ALIAS warning-hint has been emitted.
 
 
-  # Per-XSUB INPUT section parsing state:
-
-  'xsub_seen_RETVAL_in_INPUT', # Seen var called 'RETVAL' in an INPUT section.
-
-
   # Per-XSUB OUTPUT section parsing state:
-
-  'xsub_seen_OUTPUT',          # Bool: have seen an OUTPUT section.
 
   'xsub_SETMAGIC_state',       # Bool: most recent value of SETMAGIC in an
                                # OUTPUT section.
-
-  'xsub_map_varname_to_seen_in_OUTPUT', # Hash of bools: indicates which
-                               # var names have been seen in an OUTPUT
-                               # section.
-
-  'xsub_seen_RETVAL_in_OUTPUT',# Seen a var called 'RETVAL' in an OUTPUT
-                               # section.
-
-  'xsub_RETVAL_typemap_code',  # Deferred typemap code from an OUTPUT section
-                               # "RETVAL output-code" line (deferred
-                               # because RETVAL code is emitted after any
-                               # arg update code).
-
 
   # Per-XSUB code-emitting state:
 
@@ -677,7 +657,7 @@ EOM
     $self->{xsub_prototype}            = $self->{PROTOTYPES_value};
     $self->{xsub_SCOPE_enabled}        = 0;
     $self->{xsub_map_overload_name_to_seen} = {};
-    $self->{xsub_seen_NO_RETURN}            = 0;
+    $self->{xsub_seen_NO_OUTPUT}            = 0;
     $self->{xsub_seen_extern_C}             = 0;
     $self->{xsub_seen_static}               = 0;
     $self->{xsub_seen_PPCODE}               = 0;
@@ -735,7 +715,7 @@ EOM
     # function to be on the same line.)
     ($self->{xsub_return_type}) = ExtUtils::Typemaps::tidy_type($_);
 
-    $self->{xsub_seen_NO_RETURN} = 1
+    $self->{xsub_seen_NO_OUTPUT} = 1
       if $self->{xsub_return_type} =~ s/^NO_OUTPUT\s+//;
 
     # Allow one-line declarations. This splits a single line like:
@@ -978,6 +958,15 @@ EOF
     # #if, #else, #endif etc within the XSUB should balance out.
     check_conditional_preprocessor_statements();
 
+    # Save a deep copy the params created from parsing the signature.
+    # See the comments below starting "For each CASE" for details.
+
+    $self->{xsub_sig}{orig_params} = [];
+    for (@{$self->{xsub_sig}{params}}) {
+      push @{$self->{xsub_sig}{orig_params}},
+        ExtUtils::ParseXS::Node::Param->new($_);
+    }
+
     # ----------------------------------------------------------------
     # Each iteration of this loop will process 1 optional CASE: line,
     # followed by all the other blocks. In the absence of a CASE: line,
@@ -989,6 +978,27 @@ EOF
       # For a 'CASE: foo' line, emit an 'else if (foo)' style line of C.
       # Note that each CASE: can precede multiple keyword blocks.
       $self->CASE_handler($_) if $self->check_keyword("CASE");
+
+      # For each CASE, start with a fresh set of params based on the
+      # original parsing of the XSUB's signature. This is because each set
+      # of INPUT/OUTPUT blocks associated with each CASE may update the
+      # param objects in a different way.
+      #
+      # Note that $self->{xsub_sig}{names} provides a second set of
+      # references to most of these param objects; so the object hashes
+      # themselves must be preserved, and merely their contents emptied
+      # and repopulated each time. Hence also why creating the orig_params
+      # snapshot above must be a deep copy.
+      #
+      # XXX This is bit of a temporary hack.
+
+      for my $i (0.. @{$self->{xsub_sig}{orig_params}} - 1) {
+        my $op = $self->{xsub_sig}{orig_params}[$i];
+        my $p  = $self->{xsub_sig}{params}[$i];
+        %$p = ();
+        my @keys = sort keys %$op;
+        @$p{@keys} = @$op{@keys};
+      }
 
       # ----------------------------------------------------------------
       # Handle all the XSUB parts which generate declarations
@@ -1004,12 +1014,10 @@ EOF
       }
 
       # First, initialize variables manipulated by INPUT_handler().
-      $self->{xsub_seen_RETVAL_in_INPUT} = 0;  # seen a RETVAL var
       $self->{xsub_deferred_code_lines} = "";  # lines to be emitted after
                                                # PREINIT/INPUT
                         #
                         # keep track of which vars have been seen
-      $self->{xsub_seen_RETVAL_in_OUTPUT} = 0; # RETVAL seen in OUTPUT section
 
       # Process any implicit INPUT section.
       $self->INPUT_handler($_);
@@ -1035,8 +1043,8 @@ EOF
         $param->as_code($self);
       }
 
-      # These are set later if OUTPUT is found and/or CODE using RETVAL
-      $self->{xsub_seen_OUTPUT} = $self->{xsub_seen_RETVAL_in_CODE} = 0;
+      # This set later if CODE is using RETVAL
+      $self->{xsub_seen_RETVAL_in_CODE} = 0;
 
       # $implicit_OUTPUT_RETVAL (bool) indicates that a bodiless XSUB has
       # a non-void return value, so needs to return RETVAL; or to put it
@@ -1052,10 +1060,6 @@ EOF
 
         # Do any variable declarations associated with having a return value
         if ($self->{xsub_return_type} ne "void") {
-
-          # Emit the RETVAL variable declaration.
-          print "\t" . $self->map_type($self->{xsub_return_type}, 'RETVAL') . ";\n"
-            if !$self->{xsub_seen_RETVAL_in_INPUT};
 
           # If it looks like the output typemap code can be hacked to
           # use a TARG to optimise returning the value (rather than
@@ -1142,8 +1146,12 @@ EOF
           # Handle CODE: just emit the code block and check if it
           # includes "RETVAL". This check is for later use to warn if
           # RETVAL is used but no OUTPUT block is present.
+          # Ignore if its only being used in an 'ignore this var'
+          # situation
           my $consumed_code = $self->print_section();
-          if ($consumed_code =~ /\bRETVAL\b/) {
+          if (   $consumed_code =~ /\bRETVAL\b/
+              && $consumed_code !~ /\b\QPERL_UNUSED_VAR(RETVAL)/
+          ) {
             $self->{xsub_seen_RETVAL_in_CODE} = 1;
           }
 
@@ -1167,7 +1175,8 @@ EOF
 
           if ($self->{xsub_return_type} ne "void") {
             print "RETVAL = ";
-            $implicit_OUTPUT_RETVAL = 1;
+            # There's usually an implied 'OUTPUT: RETVAL' in bodiless XSUBs
+            $implicit_OUTPUT_RETVAL = 1 unless $self->{xsub_seen_NO_OUTPUT};
           }
 
           if (defined($self->{xsub_class})) {
@@ -1200,7 +1209,7 @@ EOF
 
           my $sig  = $self->{xsub_sig};
           my $args = $sig->{auto_function_sig_override}; # C_ARGS
-          $args = $sig->C_func_signature()
+          $args = $sig->C_func_signature($self)
             unless defined $args;
           print "$self->{xsub_func_name}($args);\n";
 
@@ -1214,177 +1223,75 @@ EOF
       # plus some post-processing of OUTPUT.
       # ----------------------------------------------------------------
 
-      # Initialise some state, which may be updated by calls to
-      # OUTPUT_handler():
-      $self->{xsub_seen_RETVAL_in_OUTPUT} = 0;  # bool: RETVAL seen in OUTPUT section;
-      undef $self->{xsub_RETVAL_typemap_code} ; # code to set RETVAL (from
-                                                # OUTPUT section);
-
-      # If SXUB was declared as NO_OUTPUT, then:
-      # - we don't need to return RETVAL to the caller, even if the
-      #   auto-generated call to the library function indicates it was seen
-      #   ($implicit_OUTPUT_RETVAL).
-      # - Also from this point on, treat the (non-void) return type as void.
-      ($implicit_OUTPUT_RETVAL, $self->{xsub_return_type}) =
-                                  (0, 'void') if $self->{xsub_seen_NO_RETURN};
-
-      # used by OUTPUT_handler() to detect duplicate OUTPUT var lines
-      undef %{ $self->{xsub_map_varname_to_seen_in_OUTPUT} };
-
       # Process as many keyword lines/blocks as can be found which match
       # the pattern.
       # XXX POSTCALL is documented to precede OUTPUT, but here we allow
       # them in any order and multiplicity.
       $self->process_keywords("OUTPUT|POSTCALL|$generic_xsub_keys");
 
-      # A CODE section using RETVAL must also have an OUTPUT entry
-      if (        $self->{xsub_seen_RETVAL_in_CODE}
-          and not $self->{xsub_seen_OUTPUT}
-          and     $self->{xsub_return_type} ne 'void')
       {
-        $self->Warn("Warning: Found a 'CODE' section which seems to be using 'RETVAL' but no 'OUTPUT' section.");
-      }
+        my $retval = $self->{xsub_sig}{names}{RETVAL};
 
-      # Process any OUT vars: i.e. vars that are declared OUT in
-      # the XSUB's signature rather than in an OUTPUT section.
-
-      for my $param (
-              grep {
-                     defined $_->{in_out}
-                  && $_->{in_out} =~ /OUT$/
-                  && !$self->{xsub_map_varname_to_seen_in_OUTPUT}{$_->{var}}
-              }
-              @{ $self->{xsub_sig}{params}})
-      {
-        my $var = $param->{var};
-        $self->generate_output( {
-            num         => $param->{arg_num},
-            var         => $var,
-            do_setmagic => $self->{xsub_SETMAGIC_state},
-            do_push     => undef,
-          }
-        );
-      }
-
-      # If there are any OUTLIST vars to be pushed, first extend the
-      # stack, to fit all OUTLIST vars + RETVAL
-      my $outlist_count = grep {    defined $_->{in_out}
-                                 && $_->{in_out} =~ /OUTLIST$/
-                               }
-                               @{$self->{xsub_sig}{params}};
-      if ($outlist_count) {
-        my $ext = $outlist_count;
-        ++$ext if $self->{xsub_seen_RETVAL_in_OUTPUT} || $implicit_OUTPUT_RETVAL;
-        print "\tXSprePUSH;";
-        print "\tEXTEND(SP,$ext);\n";
-      }
-
-      # ----------------------------------------------------------------
-      # All OUTPUT done; now handle an implicit or deferred RETVAL.
-      # OUTPUT_handler() will have skipped any RETVAL line, just setting
-      # $self->{xsub_seen_RETVAL_in_OUTPUT} to true and setting
-      # $self->{xsub_RETVAL_typemap_code} to the
-      # overridden typemap code on the RETVAL line, if any.
-      # Also, $implicit_OUTPUT_RETVAL indicates that an implicit RETVAL
-      # should be generated, due to a non-void CODE-less XSUB.
-      # ----------------------------------------------------------------
-
-      if (   $self->{xsub_seen_RETVAL_in_OUTPUT}
-          && $self->{xsub_RETVAL_typemap_code})
-      {
-        # Deferred RETVAL with overridden typemap code. Just emit as-is.
-        print "\t$self->{xsub_RETVAL_typemap_code}\n";
-        print "\t++SP;\n" if $outlist_count;
-      }
-      elsif ($self->{xsub_seen_RETVAL_in_OUTPUT} || $implicit_OUTPUT_RETVAL) {
-        # Deferred or implicit RETVAL with standard typemap
-
-        # Examine the typemap entry to determine whether it's possible
-        # to optimise the return code by using the OP_ENTERSUB's targ (if
-        # any) rather than creating a new mortal each time.
-        # The targetable() Typemap method looks at whether the typemap
-        # is of the form sv_setX($arg, $val) or similar, for X in iv ,uv,
-        # nv, pv, pvn.
-        # Note that we did the same lookup earlier to determine whether to
-        # emit dXSTARG, a macro which expands to something like:
-        #
-        #   SV * targ = (PL_op->op_private & OPpENTERSUB_HASTARG)
-        #               ? PAD_SV(PL_op->op_targ) : sv_newmortal()
-
-        my $outputmap = $self->{typemaps_object}->get_outputmap( ctype => $self->{xsub_return_type} );
-        my $target = $self->{config_optimize} && $outputmap && $outputmap->targetable;
-        my $var = 'RETVAL';
-        my $type = $self->{xsub_return_type};
-
-        if ($target) {
-          # Emit targ optimisation: basically, emit a PUSHi() or whatever,
-          # which will set TARG to the value and push it.
-
-          # $target->{what} is something like '(IV)$var': the part of the
-          # typemap which contains the value the TARG should be set to.
-          # Expand it via eval.
-          my $what = $self->eval_output_typemap_code(
-            qq("$target->{what}"),
-            {var => $var, type => $self->{xsub_return_type}}
-          );
-
-          if (not $target->{with_size} and $target->{type} eq 'p') {
-              # Handle sv_setpv() manually. (sv_setpvn() is handled
-              # by the generic code below, via PUSHp().)
-              print "\tsv_setpv(TARG, $what);\n";
-              print "\tXSprePUSH;\n" unless $outlist_count;
-              print "\tPUSHTARG;\n";
-          }
-          else {
-            # Emit PUSHx() for generic sv_set_xv()
-
-            # $tsize is the third arg of the sv_setpvn() in the typemap
-            # (or empty otherwise), including comma, e.g. ', sizeof($var)'.
-            # Eval it so that the result can be passed as the 2nd arg to
-            # PUSHp().
-            # XXX this could be skipped if $tsize is empty
-            my $tsize = $target->{what_size};
-            $tsize = '' unless defined $tsize;
-            $tsize = $self->eval_output_typemap_code(
-              qq("$tsize"),
-              {var => $var, type => $self->{xsub_return_type}}
-            );
-
-            print "\tXSprePUSH;\n" unless $outlist_count;
-            print "\tPUSH$target->{type}($what$tsize);\n";
-          }
+        # A CODE section using RETVAL must also have an OUTPUT entry
+        if (        $self->{xsub_seen_RETVAL_in_CODE}
+            and not ($retval && $retval->{in_output})
+            and     $self->{xsub_return_type} ne 'void')
+        {
+          $self->Warn("Warning: Found a 'CODE' section which seems to be using 'RETVAL' but no 'OUTPUT' section.");
         }
-        else {
-          # Emit a normal RETVAL
-          $self->generate_output( {
-            num         => 0,
-            var         => 'RETVAL',
-            do_setmagic => 0,   # RETVAL almost never needs SvSETMAGIC()
-            do_push     => undef,
-          } );
-          print "\t++SP;\n" if $outlist_count;
+
+        # Process any OUT vars: i.e. vars that are declared OUT in
+        # the XSUB's signature rather than in an OUTPUT section.
+
+        for my $param (
+                grep {
+                       defined $_->{in_out}
+                    && $_->{in_out} =~ /OUT$/
+                    && !$_->{in_output}
+                }
+                @{ $self->{xsub_sig}{params}})
+        {
+          $self->generate_output($param);
         }
-      }
 
-      $XSRETURN_count = 1 if $self->{xsub_return_type} ne "void";
-      my $num = $XSRETURN_count;
-      $XSRETURN_count += $outlist_count;
+        # If there are any OUTLIST vars to be pushed, first extend the
+        # stack, to fit all OUTLIST vars + RETVAL
+        my $outlist_count = grep {    defined $_->{in_out}
+                                   && $_->{in_out} =~ /OUTLIST$/
+                                 }
+                                 @{$self->{xsub_sig}{params}};
+        if ($outlist_count) {
+          my $ext = $outlist_count;
+          ++$ext if ($retval && $retval->{in_output}) || $implicit_OUTPUT_RETVAL;
+          print "\tXSprePUSH;";
+          print "\tEXTEND(SP,$ext);\n";
+        }
 
-      # Now that RETVAL is on the stack, also push any OUTLIST vars too
-      for my $param (grep  {    defined $_->{in_out}
-                             && $_->{in_out} =~ /OUTLIST$/
-                           }
-                           @{$self->{xsub_sig}{params}}
-      ) {
-        my $var = $param->{var};
-        $self->generate_output(
-          {
-            num         => $num++,
-            var         => $var,
-            do_setmagic => 0,
-            do_push     => 1,
+        # ----------------------------------------------------------------
+        # All OUTPUT done; now handle an implicit or deferred RETVAL.
+        # OUTPUT_handler() will have skipped any RETVAL line.
+        # Also, $implicit_OUTPUT_RETVAL indicates that an implicit RETVAL
+        # should be generated, due to a non-void CODE-less XSUB.
+        # ----------------------------------------------------------------
+
+          if (($retval && $retval->{in_output}) || $implicit_OUTPUT_RETVAL) {
+            # emit a deferred RETVAL from OUTPUT or implicit RETVAL
+            $self->generate_output($retval);
           }
-        );
+
+        $XSRETURN_count = 1 if     $self->{xsub_return_type} ne "void"
+                               && !$self->{xsub_seen_NO_OUTPUT};
+        my $num = $XSRETURN_count;
+        $XSRETURN_count += $outlist_count;
+
+        # Now that RETVAL is on the stack, also push any OUTLIST vars too
+        for my $param (grep  {    defined $_->{in_out}
+                               && $_->{in_out} =~ /OUTLIST$/
+                             }
+                             @{$self->{xsub_sig}{params}}
+        ) {
+          $self->generate_output($param, $num++);
+        }
       }
 
 
@@ -1999,13 +1906,7 @@ sub CASE_handler {
 #
 #   "ST(". $num - 1 . ")"
 #
-# but with subtleties when $num is 0 or undef.
-# Gathering all such uses into one place helps in documenting the totality.
-#
-# Normally parameter names are mapped to index numbers 1,2,... . In
-# addition, in *OUTPUT* processing only, 'RETVAL' is mapped to 0.
-#
-# Finally, in input processing it is legal to have a parameter with a
+# except that in input processing it is legal to have a parameter with a
 # typemap override, but where the parameter isn't in the signature. People
 # misuse this to declare other variables which should really be in a
 # PREINIT section:
@@ -2020,13 +1921,8 @@ sub CASE_handler {
 # shouldn't emit a warning when generating "ST(N-1)".
 #
 sub ST {
-  my ($self, $num, $is_output) = @_;
-
-  if (defined $num) {
-    return "ST(0)"                if $is_output && $num == 0;
-    return "ST(" . ($num-1) . ")" if $num >= 1;
-    $self->Warn("Internal error: unexpected zero num in ST()");
-  }
+  my ($self, $num) = @_;
+  return "ST(" . ($num-1) . ")" if defined $num;
   return '/* not a parameter */';
 }
 
@@ -2095,13 +1991,11 @@ sub INPUT_handler {
       next;
     }
 
-    # flag 'RETVAL' as having been seen
-    $self->{xsub_seen_RETVAL_in_INPUT} |= $var_name eq "RETVAL";
-
     my ($var_num, $is_alien);
 
     my ExtUtils::ParseXS::Node::Param $param
           = $self->{xsub_sig}{names}{$var_name};
+
 
     if (defined $param) {
       # The var appeared in the signature too.
@@ -2113,12 +2007,30 @@ sub INPUT_handler {
       # synthetic params like THIS, which are assigned a provisional type
       # which can be overridden.
       if (   $param->{in_input}
-          or (!$param->{is_synthetic} and exists $param->{type})
+          or (!$param->{is_synthetic} and defined $param->{type})
       ) {
           $self->blurt(
             "Error: duplicate definition of parameter '$var_name' ignored");
           next;
       }
+
+      if ($var_name eq 'RETVAL' and $param->{is_synthetic}) {
+        # Convert a synthetic RETVAL into a real parameter
+        delete $param->{is_synthetic};
+        delete $param->{no_init};
+        if (! defined $param->{arg_num}) {
+          # if has arg_num, RETVAL has appeared in signature but with no
+          # type, and has already been moved to the correct position;
+          # otherwise, it's an alien var that didn't appear in the
+          # signature; move to the correct position.
+          @{$self->{xsub_sig}{params}} =
+                    grep $_ != $param, @{$self->{xsub_sig}{params}};
+          push @{$self->{xsub_sig}{params}}, $param;
+          $is_alien          = 1;
+          $param->{is_alien} = 1;
+        }
+      }
+
       $param->{in_input} = 1;
       $var_num = $param->{arg_num};
     }
@@ -2209,7 +2121,6 @@ sub INPUT_handler {
 
 sub OUTPUT_handler {
   my ExtUtils::ParseXS $self = shift;
-  $self->{xsub_seen_OUTPUT} = 1;
 
   $_ = shift;
 
@@ -2230,47 +2141,41 @@ sub OUTPUT_handler {
     #
     my ($outarg, $outcode) = /^\s*(\S+)\s*(.*?)\s*$/s;
 
-    $self->blurt("Error: duplicate OUTPUT parameter '$outarg' ignored"), next
-      if $self->{xsub_map_varname_to_seen_in_OUTPUT}->{$outarg}++;
+    my ExtUtils::ParseXS::Node::Param $param =
+                                        $self->{xsub_sig}{names}{$outarg};
 
-    if (!$self->{xsub_seen_RETVAL_in_OUTPUT} and $outarg eq 'RETVAL') {
+    if ($param && $param->{in_output}) {
+      $self->blurt("Error: duplicate OUTPUT parameter '$outarg' ignored");
+      next;
+    }
+
+    if ($outarg eq "RETVAL" and $self->{xsub_seen_NO_OUTPUT}) {
+      $self->blurt("Error: can't use RETVAL in OUTPUT when NO_OUTPUT declared");
+      next;
+    }
+
+    if (   !$param  # no such param or, for RETVAL, RETVAL was void
+           # not bound to an arg which can be updated
+        or $outarg ne "RETVAL" && !$param->{arg_num})
+    {
+      $self->blurt("Error: OUTPUT $outarg not a parameter");
+      next;
+    }
+
+
+    $param->{in_output} = 1;
+    $param->{do_setmagic} = $outarg eq 'RETVAL'
+                              ? 0 # RETVAL never needs magic setting
+                              : $self->{xsub_SETMAGIC_state};
+    $param->{output_code} = $outcode if length $outcode;
+
+    if ($outarg eq 'RETVAL') {
       # Postpone processing the RETVAL line to last (it's left to the
       # caller to finish).
-      # XXX The !$self->{xsub_seen_RETVAL_in_OUTPUT} test means that if
-      # there are
-      # Duplicate RETVAL lines, then as well as blurt()ing above, the
-      # subsequent lines are processed as normal vars too. This
-      # doesn't seem useful.
-      $self->{xsub_RETVAL_typemap_code} = $outcode;
-      $self->{xsub_seen_RETVAL_in_OUTPUT} = 1;
       next;
     }
 
-    my $var_num = ($outarg eq "RETVAL" && $self->{xsub_return_type} ne "void")
-                    ? 0
-                    : $self->{xsub_sig}{names}{$outarg}{arg_num};
-
-    unless (defined $var_num) {
-      $self->blurt("Error: OUTPUT $outarg not an parameter");
-      next;
-    }
-
-    # Emit the custom var-setter code if present; else use the one from
-    # the OUTPUT typemap.
-
-    if ($outcode) {
-      print "\t$outcode\n";
-      print "\tSvSETMAGIC(" . $self->ST($var_num, 1) . ");\n"
-        if $self->{xsub_SETMAGIC_state};
-    }
-    else {
-      $self->generate_output( {
-        num         => $var_num,
-        var         => $outarg,
-        do_setmagic => $self->{xsub_SETMAGIC_state},
-        do_push     => undef,
-      } );
-    }
+    $self->generate_output($param);
   } # foreach line in OUTPUT block
 }
 
@@ -3199,15 +3104,13 @@ sub fetch_para {
 }
 
 
-# $self->generate_output({ key = value, ... })
-#
-#   num         the parameter number, corresponds to ST(num-1)
-#   var         the parameter name, such as 'RETVAL'
-#   do_setmagic whether to call set magic after assignment
-#   do_push     whether to push a new mortal onto the stack
+# $self->generate_output($param[, $out_num])
 #
 # Emit code to: possibly create, then set the value of, and possibly
-# push, an output SV.
+# push, an output SV, based on $param.
+#
+# $out_num is optional and only has meaning when an OUTLIST var is
+# being pushed - it indicates the position on the stack of that push.
 #
 # This function emits code such as "sv_setiv(ST(0), (IV)foo)", based on the
 # typemap OUTPUT entry associated with $type, passing the typemap code
@@ -3236,37 +3139,39 @@ sub fetch_para {
 # So we examine the typemap *after* evaluation to determine whether it's
 # of the form '$arg = ' or not.
 #
-# Finally, note that do_push is true when processing an OUTLIST arg.
-#
 # This function sometimes emits a C variable called RETVALSV. This is
 # private and shouldn't be referenced within XS code or typemaps.
 
 sub generate_output {
   my ExtUtils::ParseXS $self = shift;
-  my $argsref = shift;
-  my ($num, $var, $do_setmagic, $do_push)
-    = @{$argsref}{qw(num var do_setmagic do_push)};
+  my ExtUtils::ParseXS::Node::Param $param = shift;
+  my $out_num = shift;
 
-  # Determine type - this is usually from the 'type' field of the
-  # associated param object in the Sig object, but with special cases.
-  my $type;
+  my ($type, $num, $var, $do_setmagic, $output_code)
+    = @{$param}{qw(type arg_num var do_setmagic output_code)};
+
   if ($var eq 'RETVAL') {
+    # RETVAL normally has an undefined arg_num, although it can be
+    # set to a real index if RETVAL is also declared as a parameter.
+    # But when returning its value, it's always stored at ST(0).
+    $num = 1;
+
+    # It is possible for RETVAL to have multiple types, e.g.
+    #     int
+    #     foo(long RETVAL)
+    #
+    # In the above, 'long' is used for the var's declaration, while
+    # 'int' is used to generate the return code (for backwards
+    # compatibility).
     $type = $self->{xsub_return_type};
-  }
-  else {
-    my $sig = $self->{xsub_sig};
-    my $param = $sig->{names}{$var};
-    if ($param) {
-      $type = $param->{type};
-    }
   }
 
   unless (defined $type) {
     $self->blurt("Can't determine output type for '$var'");
-    next;
+    return;
   }
 
-  my $arg = $self->ST($num, 1);
+  my $arg = $self->ST($num);
 
   my $typemaps = $self->{typemaps_object};
 
@@ -3313,8 +3218,15 @@ sub generate_output {
   $type =~ tr/:/_/ unless $self->{config_RetainCplusplusHierarchicalTypes};
 
   # Specify the environment for when the typemap template is evalled.
-  my $eval_vars = {%$argsref, subtype => $subtype,
-                    ntype => $ntype, arg => $arg, type => $type };
+  my $eval_vars = {
+                    num         => $num,
+                    var         => $var,
+                    do_setmagic => $do_setmagic,
+                    subtype     => $subtype,
+                    ntype       => $ntype,
+                    arg         => $arg,
+                    type        => $type,
+                  };
 
   # Get the text of the typemap template, with a few transformations to
   # make it work better with fussy C compilers. In particular, strip
@@ -3355,6 +3267,77 @@ sub generate_output {
   elsif ($var eq 'RETVAL') {
     # If the var is called RETVAL, then we return its value on the
     # stack
+
+    # If there are any OUTLIST variables then we've already emitted
+    # the "XSprePUSH".
+    my $outlist_count = grep {    defined $_->{in_out}
+                               && $_->{in_out} =~ /OUTLIST$/
+                             }
+                             @{$self->{xsub_sig}{params}};
+
+    if (defined $output_code) {
+      # Deferred RETVAL with overridden typemap code. Just emit as-is.
+      print "\t$output_code\n";
+      print "\t++SP;\n" if $outlist_count;
+      return;
+    }
+
+    # Examine the typemap entry to determine whether it's possible
+    # to optimise the return code by using the OP_ENTERSUB's targ (if
+    # any) rather than creating a new mortal each time.
+    # The targetable() Typemap method looks at whether the typemap
+    # is of the form sv_setX($arg, $val) or similar, for X in iv ,uv,
+    # nv, pv, pvn.
+    # Note that we did the same lookup earlier to determine whether to
+    # emit dXSTARG, a macro which expands to something like:
+    #
+    #   SV * targ = (PL_op->op_private & OPpENTERSUB_HASTARG)
+    #               ? PAD_SV(PL_op->op_targ) : sv_newmortal()
+
+    my $target = $self->{config_optimize} && $outputmap->targetable;
+
+    if ($target) {
+      # Emit targ optimisation: basically, emit a PUSHi() or whatever,
+      # which will set TARG to the value and push it.
+
+      # $target->{what} is something like '(IV)$var': the part of the
+      # typemap which contains the value the TARG should be set to.
+      # Expand it via eval.
+      my $what = $self->eval_output_typemap_code(
+        qq("$target->{what}"),
+        {var => $var, type => $type}
+      );
+
+      if (not $target->{with_size} and $target->{type} eq 'p') {
+          # Handle sv_setpv() manually. (sv_setpvn() is handled
+          # by the generic code below, via PUSHp().)
+          print "\tsv_setpv(TARG, $what);\n";
+          print "\tXSprePUSH;\n" unless $outlist_count;
+          print "\tPUSHTARG;\n";
+      }
+      else {
+        # Emit PUSHx() for generic sv_set_xv()
+
+        # $tsize is the third arg of the sv_setpvn() in the typemap
+        # (or empty otherwise), including comma, e.g. ', sizeof($var)'.
+        # Eval it so that the result can be passed as the 2nd arg to
+        # PUSHp().
+        # XXX this could be skipped if $tsize is empty
+        my $tsize = $target->{what_size};
+        $tsize = '' unless defined $tsize;
+        $tsize = $self->eval_output_typemap_code(
+          qq("$tsize"),
+          {var => $var, type => $type}
+        );
+
+        print "\tXSprePUSH;\n" unless $outlist_count;
+        print "\tPUSH$target->{type}($what$tsize);\n";
+      }
+      return;
+    }
+
+    # emit a standard RETVAL return
+
     my $orig_arg = $arg;
     my @lines;           # lines of code to eventually emit
     my $use_RETVALSV = 1;
@@ -3397,7 +3380,7 @@ sub generate_output {
     #
     # There is a further special optimisation for the T_SV case,
     # where RETVAL is already of type SV* (i.e. $ntype eq 'SVPtr').
-    # In the case where the typemap of of the form '$arg = Foo($var)',
+    # In the case where the typemap is of the form '$arg = Foo($var)',
     # (as opposed to 'sv_setFOO($arg, $var)'), then we don't declare
     # RETVALSV and just use RETVAL directly.
     #
@@ -3522,15 +3505,15 @@ sub generate_output {
     }
 
     print @lines;
+    print "\t++SP;\n" if $outlist_count;
   }
 
-  elsif ($do_push) {
-    # $do_push indicates that this is an OUTLIST value, so an SV with
-    # the value should be pushed onto the stack
+  elsif (defined $out_num) {
+    # Indicates that this is an OUTLIST value, so an SV with the value
+    # should be pushed onto the stack
     print "\tPUSHs(sv_newmortal());\n";
-    $eval_vars->{arg} = $self->ST($num+1, 1);
+    $eval_vars->{arg} = $self->ST($out_num + 1);
     print $self->eval_output_typemap_code("qq\a$expr\a", $eval_vars);
-    print "\tSvSETMAGIC($arg);\n" if $do_setmagic;
   }
 
   elsif ($arg =~ /^ST\(\d+\)$/) {
@@ -3547,8 +3530,18 @@ sub generate_output {
     #
     #  which means that if we hit this branch, $evalexpr will have been
     #  expanded to something like sv_setsv(ST(2), boolSV(foo))
-    print $self->eval_output_typemap_code("qq\a$expr\a", $eval_vars);
-    print "\tSvSETMAGIC($arg);\n" if $do_setmagic;
+
+    # Use the code on the OUTPUT line if specified, otherwise use the
+    # typemap
+    my $code = defined $output_code
+        ? "\t$output_code\n"
+        : $self->eval_output_typemap_code("qq\a$expr\a", $eval_vars);
+    print $code;
+
+    # For parameters in the OUTPUT section, honour the SETMAGIC in force
+    # at the time. For parameters instead being output because of an OUT
+    # keyword in the signature, assume set magic always.
+    print "\tSvSETMAGIC($arg);\n" if !$param->{in_output} || $do_setmagic;
   }
 }
 
