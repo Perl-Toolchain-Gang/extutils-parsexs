@@ -61,11 +61,16 @@ t/lib/PrimitiveCapture.pm
 t/lib/TypemapTest/Foo.pm
 t/pseudotypemap1
 t/typemap
+t/XSAlias.xs
 t/XSBroken.xs
+t/XSFalsePositive.xs
+t/XSFalsePositive2.xs
 t/XSInclude.xsh
 t/XSMore.xs
+t/XSNoMap.xs
 t/XSTest.pm
 t/XSTest.xs
+t/XSTightDirectives.xs
 t/XSUsage.pm
 t/XSUsage.xs
 t/XSWarn.xs
