@@ -31,8 +31,6 @@ t/104-map_type.t
 t/105-valid_proto_string.t
 t/106-process_typemaps.t
 t/108-map_type.t
-t/109-standard_XS_defs.t
-t/111-analyze_preprocessor_statements.t
 t/112-set_cond.t
 t/113-check_cond_preproc_statements.t
 t/114-blurt_death_Warn.t
