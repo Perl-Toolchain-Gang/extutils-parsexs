@@ -5851,4 +5851,56 @@ EOF
     test_many($preamble, undef, \@test_fns);
 }
 
+{
+    # Test standard C file preamble
+    # check that a few standard lines are present
+
+    my $preamble = Q(<<'EOF');
+        |MODULE = Foo PACKAGE = Foo
+        |
+        |PROTOTYPES:  DISABLE
+        |
+EOF
+
+    my @test_fns = (
+        [
+            "C preamble",
+            [ Q(<<'EOF') ],
+                |void foo()
+EOF
+
+            [ 0, 0, qr{#ifndef PERL_UNUSED_VAR}, "PERL_UNUSED_VAR" ],
+            [ 0, 0, qr{#ifndef PERL_ARGS_ASSERT_CROAK_XS_USAGE},
+                        "PERL_ARGS_ASSERT_CROAK_XS_USAGE" ],
+            [ 0, 0, qr{#ifdef newXS_flags}, "newXS_flags" ],
+        ],
+    );
+
+    test_many($preamble, undef, \@test_fns);
+}
+
+{
+    # An XS file without a MODULE line should warn, but
+    # still emit the C code in the C part of the file (the whole file
+    # contents in this case).
+
+    my $preamble = '';
+
+    my @test_fns = (
+        [
+            "No MODULE line",
+            [ Q(<<'EOF') ],
+                |foo
+                |bar
+EOF
+
+            [ 0, 0, qr{#line 1 ".*"\nfoo\nbar\n#line 13 ".*"}, "all C present" ],
+            [ 1, 0, qr{Didn't find a 'MODULE ... PACKAGE ... PREFIX' line},
+                    "got expected MODULE warning"  ],
+        ],
+    );
+
+    test_many($preamble, undef, \@test_fns);
+}
+
 done_testing;

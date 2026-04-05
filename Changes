@@ -1,5 +1,9 @@
 Revision history for Perl extension ExtUtils::ParseXS.
 
+3.62 Sun Apr  5 2026
+  - allow XS files with no XS again
+  - use static, not STATIC
+
 3.61 Fri Jan  9 2026
   - rewrite perlxs.pod
   - finish refactoring to use an Abstract Syntax Tree (AST) internally
