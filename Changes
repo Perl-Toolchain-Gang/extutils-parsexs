@@ -16,14 +16,14 @@ Revision history for Perl extension ExtUtils::ParseXS.
   - rewrite perlxs.pod
   - finish refactoring to use an Abstract Syntax Tree (AST) internally
 
-3.60
+3.60 Fri Sep 26 2025
   - Fix INTERFACE for C23
   - support perl package names in INTERFACE
   - Cleanup typemap file-finding code and change priority
   - Revert throwing an exception when combining the length operator
     with a typemap other than T_PV
 
-3.59
+3.59 Fri Sep  5 2025
   - Throw an exception when combining the length operator with a
     typemap other than T_PV
 
