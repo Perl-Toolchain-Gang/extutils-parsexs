@@ -1,5 +1,9 @@
 Revision history for Perl extension ExtUtils::ParseXS.
 
+3.61 Fri Jan  9 2026
+  - rewrite perlxs.pod
+  - finish refactoring to use an Abstract Syntax Tree (AST) internally
+
 3.60
   - Fix INTERFACE for C23
   - support perl package names in INTERFACE
